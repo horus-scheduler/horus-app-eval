@@ -127,6 +127,10 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 	rocksdb_iterator_t * iter = rocksdb_create_iterator(db, readoptions);
 
 	int counter = 0;
+        /*
+         * @parham: Just a trick to have different functionalities at server for rocksdb experiments. 
+         * Client sends runNs 500 for GET and 0 for SCAN functions.
+        */
 	if (req->runNs > 0) {
 		size_t long_size;
 		char long_key[8];
@@ -154,6 +158,9 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
                 i++;
         } while ( i / 0.233 < req->runNs);*/
 
+        /*
+         * @parham: TODO: Modify these reply packet headers to match falcon headers.
+        */
         asm volatile ("cli":::);
         struct message resp;
 	resp.genNs = req->genNs;

@@ -49,8 +49,10 @@ char ip_server[][32] = {
     "10.1.0.7", "10.1.0.8", "10.1.0.9", "10.1.0.10", "10.1.0.11", "10.1.0.12",
 };
 
+
 uint16_t src_port = 11234;
 uint16_t dst_port = 1234;
+/* @parham: TODO: in this file modify anywhere that uses req->queue_length[X] we have only one qlen in packet headers */
 
 /********* Custom parameters *********/
 int is_latency_client = 0;   // 0 means batch client, 1 means latency client
@@ -145,7 +147,10 @@ static void sigint_handler(int sig) {
 /*
  * functions
  */
-
+/*
+ * @parham: They use lcores to emulate multiple clients (note that client id is summed up by lcore offset)
+ * port_offset given as input is used for diffrentiating task/request type at the server. 
+*/
 static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
                             uint16_t seq_num, uint32_t pkts_length,
                             uint64_t gen_ns, uint64_t run_ns, int port_offset) {
@@ -228,6 +233,7 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   uint64_t sjrn = cur_ns - res->gen_ns;  // diff in time
   latency_results.sjrn_times[latency_results.count] = sjrn;
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
+  
   if (is_rocksdb == 1) {
       if (res->run_ns == 0)
         res->run_ns = 780000;

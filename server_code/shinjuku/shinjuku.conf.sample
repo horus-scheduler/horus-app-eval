@@ -20,9 +20,13 @@ gateway_addr="10.1.0.1"
 ##      kernel when launching Shinjuku. Packets arriving at Each port
 ##      will be treated as belonging to different request types.
 ##      You can specify multiple entries, e.g. 'port=[X, Y, Z]'
+
+## @parham: TODO: this array can be used as worker IDs (racksched uses this to isolate different types of requests)
 port=[1234,1235,1236]
 
 ## slo : slo(s) in nanoseconds for each request type
+
+## @parham: (Not needed) ? This is only true if server is aware of request/task type.
 slo=[50,500,5000]
 
 ## queue_settings : If true enqueue preempted packets to the head of their
@@ -30,6 +34,8 @@ slo=[50,500,5000]
 queue_setting=[false]
 
 ## preemption_delay: preemption time quantum in ns.
+
+## @parham: TODO: (I think) we can use a very large quantum to avoid preemption (schedule FCFS instead of Processor Sharing)
 preemption_delay=250000
 
 ## arp: allows you to add static arp entries in the interface arp table.
@@ -101,6 +107,9 @@ devices="0:05:00.0"
 ##      the second is used for the networking subsystem. Shinjuku performs
 ##      best when these two belong to the same physical core. The rest of the
 ##      units are used as worker cores.
+
+## @parham: 2 Cores needed for networker and dispatcher. Others act as workers. 
+## TODO: Are these threads (lcores) or physical cores? Doesn't seem to be physical cores. 
 cpu=[0,8,1,2,3,4,5,6,7]
 
 ## loader_path : kernel loader to use with IX module:

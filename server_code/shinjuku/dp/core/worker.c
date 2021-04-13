@@ -118,12 +118,18 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 
         struct message * req = (struct message *) data;
 
+        /* 
+        TODO: @parham "0.58" Hardcoded to match the runNs with number of nops should we change this?
+        */ 
         uint64_t i = 0;
         do {
                 asm volatile ("nop");
                 i++;
         } while ( i / 0.58 < req->runNs);
 
+        /*
+         * @parham: TODO: Modify these reply packet headers to match falcon headers.
+        */
         asm volatile ("cli":::);
         struct message resp;
 	resp.genNs = req->genNs;
@@ -141,6 +147,7 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 	// 	}
 	// }
 
+        
         struct ip_tuple new_id = {
                 .src_ip = id->dst_ip,
                 .dst_ip = id->src_ip,

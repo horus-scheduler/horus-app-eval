@@ -87,11 +87,19 @@ static inline void dispatch_request(int i, uint64_t cur_time)
 	struct request * req;
         uint8_t type, category;
         uint64_t timestamp;
-
+        
+        /* 
+        @parham: Pick a task from the queue "tskq"
+        TODO: need to isolate the workers here:
+        Pass the i (cpu core id) to the dequeue function so it can dequeue from the queues that belong to a certian worker
+        TODO: Use naive
+        */
         if(smart_tskq_dequeue(tskq, &rnbl, &req, &type,
                               &category, &timestamp, cur_time))
                 return;
+        // @parham: changes the worker stat to RUNNING (Busy) So the parent loop won't call this function no more (until flag changes)
         worker_responses[i].flag = RUNNING;
+        // @parham: Fill the dispatcher_request array for this worker, with regards to data that we took from taskq
         dispatcher_requests[i].rnbl = rnbl;
         dispatcher_requests[i].req = req;
         dispatcher_requests[i].type = type;
@@ -113,17 +121,22 @@ static inline void preempt_worker(int i, uint64_t cur_time)
 
 static inline void handle_worker(int i, uint64_t cur_time)
 {
-        if (worker_responses[i].flag != RUNNING) {
+        if (worker_responses[i].flag != RUNNING) { // @parham: Worker is not executing anything...
                 if (worker_responses[i].flag == FINISHED) {
                         handle_finished(i);
                 } else if (worker_responses[i].flag == PREEMPTED) {
                         handle_preempted(i);
                 }
-                dispatch_request(i, cur_time);
+                dispatch_request(i, cur_time);  // Dispatch for worker i (i is core number)
         } else
                 preempt_worker(i, cur_time);
 }
 
+/*
+ * @parham: The networker_pointers elements are added by networker.c do_networking().
+ * Here this function takes those elements and enqueues task objects into the taskq[] 
+ * Racksched has different tasqs for types of packets, we will use these different queues for different workers/vclusters?
+*/
 static inline void handle_networker(uint64_t cur_time)
 {
         int i, ret;
@@ -158,6 +171,9 @@ static inline void handle_networker(uint64_t cur_time)
 
 /**
  * do_dispatching - implements dispatcher core's main loop
+ * @parham: This is the main loop:
+ *      Calls "handle_networker()" which enqueues the requests received (from networker.c which calls ethernet recv) to tasq array. 
+ *      Calls "handle_worker()" for each worker core. The handle_worker() will try to dequeue from tasq and dispatch for that so it will run it (worker.c).
  */
 void do_dispatching(int num_cpus)
 {

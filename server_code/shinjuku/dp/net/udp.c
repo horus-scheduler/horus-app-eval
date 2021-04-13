@@ -44,6 +44,11 @@
 
 #include "net.h"
 
+/*
+	@parham: function checks udp dst_port and returns it if it matches the config "ports"
+	TODO: (option) modify this function, use dst_id in Falcon header to identify the worker this is needed for isolating queues
+
+*/
 int udp_input(struct mbuf *pkt, struct ip_hdr *iphdr, struct udp_hdr *udphdr)
 {
 	int i;

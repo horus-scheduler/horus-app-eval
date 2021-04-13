@@ -346,6 +346,10 @@ void *start_cpu(void *arg)
         } else {
 	        started_cpus++;
 	        pthread_barrier_wait(&start_barrier);
+			/* @parham: do_worker() does the work!
+				it checks for work to be available and runs it.
+				Any arbitrary program should be added inside generic_work() function in worker.c.
+			*/
                 do_work();
         }
 
@@ -451,6 +455,11 @@ int main(int argc, char *argv[])
 
 	// open DB
 	char *err = NULL;
+	/*
+	 @parham: this DB is created by db/create_db.c program, 
+	 setup.sh: Makes create_db program and runs it.
+	 build_and_run.sh: copies the created db to this path. 
+	*/
 	char DBPath[] = "/tmp/my_db";
 	db = rocksdb_open(options, DBPath, &err);
 	assert(!err);

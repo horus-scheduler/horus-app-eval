@@ -56,6 +56,12 @@ struct mempool request_mempool __attribute((aligned(64)));
 struct mempool_datastore rq_datastore;
 struct mempool rq_mempool __attribute((aligned(64)));
 
+/*
+ * @parham: This struct holds the packet headers used by Racksched.
+ * TODO: Modify this to be consistent with Falcon headers:
+ * 
+ * 
+*/
 struct message {
         uint8_t type;
         uint16_t seq_num;
@@ -132,6 +138,9 @@ struct fini_request_queue {
 
 struct fini_request_queue frqueue;
 
+/*
+ * @parham: Frees the cell for finished request
+*/
 static inline struct request * request_dequeue(struct fini_request_queue * frq)
 {
         struct fini_request_cell * tmp;
@@ -148,6 +157,9 @@ static inline struct request * request_dequeue(struct fini_request_queue * frq)
         return req;
 }
 
+/*
+ * @parham: This function is used only for handling finished requests! 
+*/
 static inline void request_enqueue(struct fini_request_queue * frq, struct request * req)
 {
         if (unlikely(!req))
@@ -250,6 +262,11 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
                                      struct request ** req, uint8_t *type,
                                      uint8_t *category, uint64_t *timestamp)
 {
+        /* 
+                @parham: Here CFG (aka config) .num_ports is number of different (isolated) queues to maintain.
+                TODO: Modify num_ports and set it to the number of workers running on the machine.
+                TODO: Then instead of checking all of the tq indices, just check the queues that.
+        */
         int i;
         for (i = 0; i < CFG.num_ports; i++) {
                 if(tskq_dequeue(&tq[i], rnbl_ptr, req, type, category,
@@ -259,6 +276,9 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
         return -1;
 }
 
+/*
+ @parham: smart_tskq_dequeue reads 
+*/
 static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
                                      struct request ** req, uint8_t *type,
                                      uint8_t *category, uint64_t *timestamp,
@@ -268,7 +288,7 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
         uint64_t queue_stamp;
         int index = -1;
         double max = 0;
-
+        
         for (i = 0; i < CFG.num_ports; i++) {
                 ret = get_queue_timestamp(&tq[i], &queue_stamp);
                 if (ret)
@@ -289,6 +309,10 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
         return -1;
 }
 
+/*
+ * @parham: Parses the packet headers: eth, ip, udp.
+ *      Should work with Falcon as well with some modifications. TODO: Modify the msg part  
+*/
 static inline struct request * rq_update(struct request_queue * rq, struct mbuf * pkt)
 {
 	// Quickly parse packet without doing checks

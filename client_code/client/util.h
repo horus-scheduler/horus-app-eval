@@ -24,6 +24,10 @@
 
 #define IP_SRC "10.1.0.12"
 #define IP_DST "10.1.0.1"
+/* 
+ * @parham: Service port is the one that identifies Racksched packets in their switch codes.
+ * We use similar approach. They Add offsets to diffrentiate different request types. we can use this to differentiate target workers. 
+ */
 #define CLIENT_PORT 11234
 #define SERVICE_PORT 1234
 
@@ -200,6 +204,9 @@ void free_trimodal_dist(TrimodalDist *trimodal_dist) {
   free((void *)trimodal_dist);
 }
 
+/* @parham: Racksched headers declared here:
+ * TODO: Modify here to match Falcon headers.
+*/ 
 typedef struct Message_ {
   uint8_t type;
   uint16_t seq_num;

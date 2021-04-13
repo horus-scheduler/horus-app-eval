@@ -44,34 +44,42 @@
 
 /**
  * do_networking - implements networking core's functionality
+ * @parham: Receives packets from eth, and  fills the networker_pointer array, also removes the ones that are already done.
+ * 
  */
 void do_networking(void)
 {
-        int i, j, num_recv;
+	int i, j, num_recv;
 	rqueue.head = NULL;
-        while(1) {
-                eth_process_poll();
-                num_recv = eth_process_recv();
+	while (1)
+	{
+		eth_process_poll();
+		num_recv = eth_process_recv();
 		if (num_recv == 0)
 			continue;
-                while (networker_pointers.cnt != 0);
-                for (i = 0; i < networker_pointers.free_cnt; i++) {
-			struct request * req = networker_pointers.reqs[i];
-			for (j = 0; j < req->pkts_length; j++) {
+		while (networker_pointers.cnt != 0)
+			;
+		for (i = 0; i < networker_pointers.free_cnt; i++)
+		{
+			struct request *req = networker_pointers.reqs[i];
+			for (j = 0; j < req->pkts_length; j++)
+			{
 				mbuf_free(req->mbufs[j]);
 			}
 			mempool_free(&request_mempool, req);
-                }
-                networker_pointers.free_cnt = 0;
+		}
+		networker_pointers.free_cnt = 0;
 		j = 0;
-                for (i = 0; i < num_recv; i++) {
-			struct request * req = rq_update(&rqueue, recv_mbufs[i]);
-			if (req) {
+		for (i = 0; i < num_recv; i++)
+		{
+			struct request *req = rq_update(&rqueue, recv_mbufs[i]);
+			if (req)
+			{
 				networker_pointers.reqs[j] = req;
-				networker_pointers.types[j] = (uint8_t) recv_type[i];
+				networker_pointers.types[j] = (uint8_t)recv_type[i];
 				j++;
 			}
-                }
-                networker_pointers.cnt = j;
-        }
+		}
+		networker_pointers.cnt = j;
+	}
 }
