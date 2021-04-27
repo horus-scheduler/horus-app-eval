@@ -10,3 +10,4 @@
 # Bin
 *.o
 *.so
+./config.py
