@@ -1,147 +1,186 @@
-## 0. Introduction<br>
 
-This repository contains the source code for our OSDI'20 paper
-["RackSched: A Microsecond-Scale Scheduler for Rack-Scale Computers"](https://www.usenix.org/conference/osdi20/presentation/zhu).
+This repository contains the code for programs that run on end-hosts in in-network scheduling experiments.
+The code is based on [Racksched repo](https://github.com/netx-repo/RackSched).
 
-## 1. Content<br>
+------
+# Guide
+## Downgrading Kernel Version to 4.4
 
-- client_code/<br>
-  - client/: dpdk code for default client.<br>
-  - cs-client/: `Client(100)` in Figure 14, where the clients track the queue lengths.<br>
-  - failure-client/: used in Figure 17(a).<br>
-  - r2p2-client/: used for `R2P2` in Figure 14.<br>
-  - reconfig-client/: used in Figure 17(b).<br>
-- server_code/<br>
-  - r2p2/: used for `R2P2` in Figure 14.<br>
-  - shinjuku/: default Shinjuku server.<br>
-  - shinjuku-rocskdb/: used in Figure 13.<br>
-- switch_code/<br>
-  - basic_switch/: only do ipv4 routing.
-  - ht/: multi-stage register arrays for `ReqTable`.
-  - includes/: packet header, parser and routing table.
-  - qlen/: register arrays for `LoadTable`.
-  - int2/: used in Figure 16, which only tracks the minimum number of outstanding requests.
-  - p4_sq/: used for `Sampling-4` in Figure 15.
-  - proactive/: used for `Proactive` in Figure 16.
-  - r2p2/: used for `R2P2` in Figure 14.
-  - random_schedule/: used for `Shinjuku` by default.
-  - random_schedule_2server/: used for `Shinjuku(2)` in Figure 12.
-  - random_schedule_4server/: used for `Shinjuku(4)` in Figure 12.
-  - rr_schedule/: used for `RR` in Figure 15.
-  - rscs/: used for `RSCS` by default.
-  - rscs_2server/: used for `RSCS(2)` in Figure 12.
-  - rscs_4server/: used for `RSCS(4)` in Figure 12.
-  - rscs_multi/: used in Figure 17(a), which has the `ReqTable` to store the connection states.
-  - server_reconfig/: used in Figure 17(b).
-  - shortest/: used for `Shortest` in Figure 15.
-  - po2.p4: used for power-of-2 choices
-- console.py: A script to help run evaluations.<br>
-- config.py: Some parameters to configure.<br>
-- README.md: This file.<br>
+### Download and install old kernel
+> General note:  after reboot the 10G interface might get precedence and system could boot using that. In that case we get locked out!
+> To fix this, make sure that only the primary interface is up in interface defult setting: /etc/network/interfaces.
+Based on these sources: 
+https://serverascode.com/2019/05/17/install-and-boot-older-kernel-ubuntu.html
 
-## 2. Environment requirement<br>
+https://unix.stackexchange.com/questions/198003/set-default-kernel-in-grub
 
-- Hardware
-  - A Barefoot Tofino switch.<br>
-  - Servers with a DPDK-compatible NIC (we used an Intel XL710 for 40GbE QSFP+) and multi-core CPU.<br>
-- Software<br>
-  The current version of RSCS is tested on:<br>
-  - Barefoot P4 Studio (version 8.9.1 or later).<br>
-  - DPDK (16.11.1) for the clients.<br>
-  - Linux kernel 4.4 and gcc version 5.5 for Shinjuku servers.<br>
-  We provide easy-to-use scripts to run the experiments and to analyze the results. To use the scripts, you need:
-  - Python 3.6+, paramiko at your endhost.<br>
-    `pip3 install paramiko`
+To install old kernel:
 
-## 3. How to run<br>
+```
+sudo apt install linux-image-4.4.0-142-generic
+```
 
-- Configure the parameters in the files based on your environment<br>
-  - `config.py`: provide the information of your servers (username, passwd, hostname, dir).<br>
-- Environment setup<br>
-  - Setup the switch<br>
-    - Setup the necessary environment variables to point to the appropriate locations.<br>
-    - Copy the files to the switch.<br>
-    - `python3 console.py sync_switch`<br>
-  - Compile p4 programs.<br>
-    - `python3 console.py compile_switch <prog_name>`<br>
-      This will take **a couple of minutes**. You can check `switch_code/logs/p4_compile.log` in the switch to see if it's finished.
-      Example: `python3 console.py compile_switch rscs`
-- Setup the servers<br>
-  - Setup DPDK environment (install dpdk, and set correct environment variables).<br>
-  - Copy the files to the servers.<br>
-    - `python3 console.py sync_server`<br>
-  - For Shinjuku-based basic and RocksDB servers: install the necessary libraries and pull the dependencies<br>
-    - `python3 console.py setup_basic_server` or `python3 console.py setup_rocksdb_server`<br>
-    - Note that depending on your specific machine configuration and networking condition, the time to finish the above command may vary. We have reserved 60s for basic server and 90s for RocksDB server.<br>
-    - Also note that sometimes the dependency source will randomly reset the connection when too many servers fetch dependencies at the same time, causing some servers successfully fetch the dependencies while the others fail. In this case, please try running the command for another time or manually fetch the dependency by running `./deps/fetch-deps.sh` in the corresponding server directory.
-  - For R2P2 server: build the customized DPDK and setup the DPDK related environment variables<br>
-    - `python3 console.py setup_r2p2_server`<br>
-    - Building DPDK takes time, we reserved 180s for it to complete.<br>
-  - Building the server is incorporated in running the server.<br>
-- Build the clients<br>
-  - For all kinds of clients, install DPDK, and set correct environment variables).<br>
-    - `python3 console.py install_dpdk` <br>
-  - make/build the client.<br>
-- Run the programs<br>
-  - Run p4 program on the switch<br>
-    - `python3 console.py run_switch rscs`<br>
-      It will bring up both the data-plane module and the control-plane module. It may take **up to 150 seconds** (may vary between devices). You can check `switch_code/logs/run_ptf_test.log` in the switch to see if it's finished (it will output the real-time queue length list).
-  - Run Shinjuku servers and clients to reproduce results in the paper<br>
-    - `python3 console.py fig_*`<br>
-- Kill the processes<br>
-  - Kill the switch process
-    - `python3 console.py kill_switch`
-  - Kill the Shinjuku or R2P2 processes
-    - `python3 console.py kill_server`
-  - Kill the client processes
-    - `python3 console.py kill_client`
-  - Kill all the processes (switch, servers, clients)
-    - `python3 console.py kill_all`
-- Other commands<br>
-  There are also some other commands you can use:
-  - `python3 console.py sync_switch`<br>
-    copy the local "switch_code" to the switch
-  - `python3 console.py sync_server`<br>
-    copy the local "server_code" to the servers
-  - `python3 console.py sync_client`<br>
-    copy the local "client_code" to the clients
+Hold:
+Since Ubuntu regularly wants to upgrade you to a newer kernel, you can apt-mark the package so it doesn't get removed again
+```
+sudo apt-mark hold linux-image-4.4.0-142-generic
+```
+Based on this link, need to install headers and extras (had ethernet problem before this, not sure if necessary):
+https://askubuntu.com/questions/798975/no-network-no-usb-after-kernel-update-in-14-04
 
-## 4. How to reproduce the results<br>
+```
+sudo apt-get install linux-headers-4.4.0-142-generic
+sudo apt-get install linux-image-extra-4.4.0-142-generic
+```
+### Update GRUB
 
-**NOTE**
-We recommend running RocksDB(`python3 console.py fig_13`) and R2P2(`python3 console.py fig_14_r2p2`) at last, as these experiments may require server reboot.
+Comment out your current default grub in `/etc/default/grub` and replace it with the sub-menu's `$menuentry_id_option` from output of this command:
+`grep submenu /boot/grub/grub.cfg`
+followed by '>', followed by the selected kernel's `$menuentry_id_option`. (output of this command: 
+`grep gnulinux /boot/grub/grub.cfg`).
 
-- Configure the parameters in the files based on your environment
-  - `config.py`: provide the information of your servers (username, passwd, hostname, dir).<br>
-- Setup the switch
-  - Setup the necessary environment variables to point to the appropriate locations.<br>
-  - Copy the files to the switch: `python3 console.py sync_switch`<br>
-  - Compile the rscs: `python3 console.py compile_switch`<br>
-    Again it will take **a couple of minutes**. You can check `switch_code/logs/p4_compile.log` in the switch to see if it's finished.
-- Setup the servers
-  - Copy the necessary files to server: `python3 console.py sync_server`<br>
-  - Setup the basic server, RocksDB server (for Figure 13), and R2P2 server (for Figure 14) before reproducing the figures.<br>
-    - Basic Shinjuku server: `python3 console.py setup_basic_server`<br>
-    - RocksDB Shinjuku server: `python3 console.py setup_rocksdb_server`<br>
-    - R2P2 server: `python3 console.py setup_r2p2_server`<br>
-- Build the clients
-  - Basic client: `python3 console.py build_basic_client`<br>
-  - CS client: `python3 console.py build_cs_client`<br>
-  - Failure client: `python3 console.py build_failure_client`<br>
-  - R2P2 client: `python3 console.py build_r2p2_client`<br>
-  - Reconfig client: `python3 console.py build_reconfig_client`<br>
-- After both the switch and the servers are correctly configured, you can replay the results by running console.py. The following command will execute the switch program, shinjuku server programs, and client programs automatically and output the results to the terminal.<br>
-  - Figure 10: `python3 console.py fig_10`<br>
-  - Figure 11: `python3 console.py fig_11`<br>
-  - Figure 12: `python3 console.py fig_12`<br>
-  - Figure 13: `python3 console.py fig_13`<br>
-  - `R2P2` in Figure 14: `python3 console.py fig_14_r2p2`<br>
-  - `Client(100)` in Figure 11: `python3 console.py fig_14_client`<br>
-  - Figure 15: `python3 console.py fig_15`<br>
-  - Figure 16: `python3 console.py fig_16`<br>
-  - Figure 17(a): `python3 console.py fig_17_failure`<br>
-  - Figure 17(b): `python3 console.py fig_17_reconfig`<br>
+Example GRUB_DEFAULT:
+```
+"gnulinux-advanced-b9283994-ad47-412a-8662-81957a75ab4d>gnulinux-4.4.0-142-generic-advanced-b9283994-ad47-412a-8662-81957a75ab4d"
+```
+Update grub to make the changes. For Debian this is done like so:
 
-## 5. Contact<br>
+```
+$ sudo update-grub
+```
 
-For any question, please contact `hzhu at jhu dot edu`.
+> **Reverting to latest version:**
+To revert to latest kernel just need to uncomment the line 
+#GRUB_DEFAULT=0 in /etc/default/grub again.
+
+Then reboot the system.
+
+### Install the default NIC  drivers
+Without this step, the default ethernet did not show up after reboot. 
+
+Follow these instructions to install the driver manually:
+https://askubuntu.com/questions/1067564/intel-ethernet-i219-lm-driver-in-ubuntu-16-04
+
+It takes a couple of minuets for system to get DNS settings. Manually Add these lines to `/etc/resolv.conf` (with sudo access):
+```
+nameserver 142.58.233.11
+
+nameserver 142.58.200.2
+
+search cmpt.sfu.ca
+```
+
+> If keyboard is connected, the system won't boot until you press F1! That is because of the Dell's Cover openned alert! (not resolved)
+>https://www.dell.com/support/kbdoc/en-ca/000150875/how-to-reset-or-remove-an-alert-cover-was-previously-removed-message-that-appears-when-starting-a-dell-optiplex-computer
+
+## Dependencies and Environment
+```
+apt-get install libconfig-dev libnuma-dev
+apt-get install liblz4-dev libsnappy-dev libtool-bin
+
+```
+```
+cd ./server_code/shinjuku-rocksdb/deps/
+./fetch-deps.sh
+```
+
+### Fix Dune hardware compatibility issue:
+
+Sumamry of the issue and root cause (as far as we know) are below. TD;LR To run our nsl-5* machines Intel(R) Xeon(R) E-2186G CPU, we disable Dune's APIC Interrupt calls. Also, we disable the preemption mechanism in Shinjuku (it's by design;  we did not intend to evaluate the server scheduler).
+
+Apply the patch "apic_disable.patch" in the deps/dune folder.
+Other modifications are already done in shinjuku's dp folder.
+
+>When running Shinjuku it freezes when calling the init function of Dune.  
+It freezes just after  [this line](https://github.com/kkaffes/dune/blob/78c6679a993b9e014d0f7deb030dc5bbd0abe0b8/libdune/entry.c#L481).
+CPU gets stock after creating vCPU.
+
+>For Dune, [this repo](https://github.com/ix-project/dune) works fine on our machine but the one Shinjuku uses is from this repo [this repo](https://github.com/kkaffes/dune). The problem is that the second repo adds some new APIs and functionalities to Dune that are necessary for Shinjuku so it is not possible to simply use the first Dune. 
+
+>The issue was related to the usage of Advanced Programmable Interrupt Controllers (APIC) in Dune. It seems like there are multiple operations on the "hardware-specific register" and the address of these registers and values were hardcoded in Dune codes. I think there might be changes in these hardware-specific registers in the next-gen Intel CPUs and that's why it worked on Ramses but didn't work on nsl-55 (the CPUs are from different year/generations).
+
+
+### Disable KASLR
+
+Dune does not support kernel address space layout randomization (KASLR). For newer kernels, you must specify the nokaslr parameter in the kernel command line. Check before inserting the module by executing  `cat /proc/cmdline`. If the command line does not include the nokaslr parameter, then you must add it. In order to add it in Ubuntu-based distributions, you must:
+
+-   edit the file  `/etc/default/grub`,
+-   append  `nokaslr`  in the  `GRUB_CMDLINE_LINUX_DEFAULT`  option,
+-   execute  `sudo grub-mkconfig -o /boot/grub/grub.cfg`, and
+-   reboot the system.
+
+Execute the following scripts:
+```
+#!/bin/sh
+
+# Remove kernel modules
+sudo rmmod pcidma
+sudo rmmod dune
+
+# Set huge pages
+sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
+
+# Unbind NICs
+sudo ./deps/dpdk/tools/dpdk_nic_bind.py --force -u <NIC>
+
+make -sj64 -C deps/dune
+make -sj64 -C deps/pcidma
+make -sj64 -C deps/dpdk config T=x86_64-native-linuxapp-gcc
+make -sj64 -C deps/dpdk
+make -sj64 -C deps/rocksdb static_lib
+make -sj64 -C deps/opnew
+# Insert kernel modules
+sudo insmod deps/dune/kern/dune.ko
+sudo insmod deps/pcidma/pcidma.ko
+
+# Create RocksDB database
+make -C db
+cd db
+#rm -r my_db
+./create_db
+cd ../
+
+# Create clean copy of DB.
+rm -r /tmp/my_db
+cp -r db/my_db /tmp/my_db
+
+```
+
+### Dependencies for client machine 
+> This is only needed for the machine that runs DPDK client.
+
+Setup the DPDK environments variables:
+```
+export RTE_SDK=/home/pyassini/dpdk/dpdk-stable-16.11.1
+
+export RTE_TARGET=x86_64-native-linuxapp-gcc
+```
+
+```
+cd client_code/client/tools
+./tools.sh install_dpdk
+```
+
+
+
+## Build and run
+> Note that we made changes to DPDK client and Server's checksum checking inorder to make it work without switch. Modify hardcoded MAC in "dpdk_client.c" or simply remove when using the hardware switch.
+
+### For server machines:
+```
+cd ./server_code/shinjuku-rocksdb/
+make clean
+make -sj64
+LD_PRELOAD=./deps/opnew/dest/libnew.so ./dp/shinjuku
+```
+### For client machines:
+```
+sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
+
+sudo ~/dpdk/dpdk-stable-16.11.1/tools/dpdk-devbind.py -b igb_uio <NIC>
+
+cd ./client_code/client/
+make
+sudo ./build/dpdk_client -l 0, 1, 2
+```
+> -l option tells the DPDK wich lcores to use. Using all cores resuled in super fast memory fill and segmentation error.
