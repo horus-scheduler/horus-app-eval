@@ -121,8 +121,9 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
         void * data = (void *)((uint64_t) msw << 32 | lsw);
         int ret;
 
-        struct message * req = (struct message *) data;
-
+           struct message * req = (struct message *) data;
+    log_info("Generic work being executed on %d\n", cpu_nr_);
+    log_info("queue_length 0: %d\n", cpu_nr_);
 	rocksdb_readoptions_t * readoptions = rocksdb_readoptions_create();
 	rocksdb_iterator_t * iter = rocksdb_create_iterator(db, readoptions);
 
@@ -138,6 +139,8 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 		for (int i = 0; i < 60; i++) {
 			char * long_val = rocksdb_get(db, readoptions, long_key, 8,
                                                       &long_size, NULL);
+            //log_info("got string from DB %s \n", long_val);
+            //log_info("str size %d \n", strlen(long_val));
 			free(long_val);
 		}
 	} else {
@@ -229,7 +232,9 @@ static inline void handle_new_packet(void)
         void * data;
         struct ip_tuple * id;
         struct mbuf * pkt = (struct mbuf *) dispatcher_requests[cpu_nr_].req->mbufs[0];
+        
         parse_packet(pkt, &data, &id);
+        
         if (data) {
                 uint32_t msw = ((uint64_t) data & 0xFFFFFFFF00000000) >> 32;
                 uint32_t lsw = (uint64_t) data & 0x00000000FFFFFFFF;
@@ -269,10 +274,14 @@ static inline void handle_request(void)
 {
         while (dispatcher_requests[cpu_nr_].flag == WAITING);
         dispatcher_requests[cpu_nr_].flag = WAITING;
-        if (dispatcher_requests[cpu_nr_].category == PACKET)
+        if (dispatcher_requests[cpu_nr_].category == PACKET){
+                
                 handle_new_packet();
-        else
+        }
+        else{
                 handle_context();
+                
+            }
 }
 
 static inline void finish_request(void)
@@ -304,3 +313,4 @@ void do_work(void)
                 finish_request();
         }
 }
+

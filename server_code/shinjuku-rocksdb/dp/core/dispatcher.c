@@ -128,8 +128,9 @@ static inline void handle_worker(int i, uint64_t cur_time)
                         handle_preempted(i);
                 }
                 dispatch_request(i, cur_time);  // Dispatch for worker i (i is core number)
-        } else
-                preempt_worker(i, cur_time);
+        } 
+        //else
+                //preempt_worker(i, cur_time);
 }
 
 /*
@@ -190,3 +191,4 @@ void do_dispatching(int num_cpus)
                 handle_networker(cur_time);
         }
 }
+

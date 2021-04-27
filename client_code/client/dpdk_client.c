@@ -176,6 +176,12 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   // init req msg
   Message *req = (Message *)((uint8_t *)eth + sizeof(header_template));
 
+  eth->d_addr.addr_bytes[0] = 0xF8;
+  eth->d_addr.addr_bytes[1] = 0xF2;
+  eth->d_addr.addr_bytes[2] = 0x1E;
+  eth->d_addr.addr_bytes[3] = 0x13;
+  eth->d_addr.addr_bytes[4] = 0xCA;
+  eth->d_addr.addr_bytes[5] = 0xFC;
   inet_pton(AF_INET, ip_client[client_index], &(ip->src_addr));
   inet_pton(AF_INET, ip_server[server_index], &(ip->dst_addr));
   udp->src_port = htons(src_port + port_offset);
@@ -201,6 +207,7 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   mbuf->pkt_len += sizeof(Message);
 
   pkt_sent++;
+  printf("sent cnt: %lu\n", pkt_sent);
 }
 
 static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
@@ -728,3 +735,4 @@ int main(int argc, char **argv) {
 
   return 0;
 }
+

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # update parameters
-PCI_PATH="05:00.0"
+PCI_PATH="0000:81:00.0"
 WORKDIR=/media/sf_in-network-service/kvsrc/netcache
 
 # fixed parameters
