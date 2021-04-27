@@ -17,17 +17,13 @@
 #define MBUF_SIZE (2048 + sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM)
 #define MBUF_CACHE_SIZE 32
 #define MAX_BURST_SIZE 32
-#define MAX_LCORES 32
+#define MAX_LCORES 4
 #define NB_RXD 128  // RX descriptors
 #define NB_TXD 512  // TX descriptors
-#define RX_QUEUE_PER_LCORE 4
+#define RX_QUEUE_PER_LCORE 1
 
 #define IP_SRC "10.1.0.12"
 #define IP_DST "10.1.0.1"
-/* 
- * @parham: Service port is the one that identifies Racksched packets in their switch codes.
- * We use similar approach. They Add offsets to diffrentiate different request types. we can use this to differentiate target workers. 
- */
 #define CLIENT_PORT 11234
 #define SERVICE_PORT 1234
 
@@ -204,9 +200,6 @@ void free_trimodal_dist(TrimodalDist *trimodal_dist) {
   free((void *)trimodal_dist);
 }
 
-/* @parham: Racksched headers declared here:
- * TODO: Modify here to match Falcon headers.
-*/ 
 typedef struct Message_ {
   uint8_t type;
   uint16_t seq_num;
@@ -275,7 +268,7 @@ static void enqueue_pkt(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   lconf->tx_mbufs.m_table[lconf->tx_mbufs.len++] = mbuf;
 
   // enough packets in TX queue
-  if (unlikely(lconf->tx_mbufs.len == MAX_BURST_SIZE)) {
+  if (unlikely(lconf->tx_mbufs.len > 1)) {
     send_pkt_burst(lcore_id);
   }
 }

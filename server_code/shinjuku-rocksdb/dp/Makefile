@@ -34,7 +34,7 @@ CC	= gcc
 CFLAGS	= -g -Wall -fno-pie -fno-dwarf2-cfi-asm -fno-asynchronous-unwind-tables -O3 -mno-red-zone $(INC) -D__KERNEL__ $(EXTRA_CFLAGS)
 LD	= g++
 LDFLAGS	= -T ix.ld -no-pie
-LDLIBS	= -lrt -lpthread -lm -lnuma -ldl -lconfig ../deps/rocksdb/librocksdb.a -lgflags -lsnappy -lz -llz4
+LDLIBS	= -lrt -lpthread -lm -lnuma -ldl -lconfig ../deps/rocksdb/librocksdb.a /usr/lib/x86_64-linux-gnu/libbz2.a -lgflags -lsnappy -lz -llz4
 WRAP_FLAGS = -Wl,-wrap,malloc -Wl,-wrap=malloc -Wl,-wrap=free -Wl,-wrap=calloc -Wl,-wrap=realloc
 
 ifneq ($(DEBUG),)
@@ -91,4 +91,3 @@ clean:
 
 dist-clean: clean
 	rm *~
-

@@ -1,6 +1,6 @@
 .PHONY: clean librocksdb
 
-PLATFORM_LDFLAGS  = -lrt -lpthread -lm -lnuma -ldl -lconfig ../deps/rocksdb/librocksdb.a -lgflags -lsnappy -lz -llz4
+PLATFORM_LDFLAGS  = -lrt -lpthread -lm -lnuma -ldl -lconfig ../deps/rocksdb/librocksdb.a /usr/lib/x86_64-linux-gnu/libbz2.a -lgflags -lsnappy -lz -llz4
 
 all: create_db
 

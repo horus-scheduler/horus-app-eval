@@ -25,6 +25,7 @@ sudo insmod deps/pcidma/pcidma.ko
 # Create RocksDB database
 make -C db
 cd db
-rm -r my_db
+#rm -r my_db
 ./create_db
 cd ../
+

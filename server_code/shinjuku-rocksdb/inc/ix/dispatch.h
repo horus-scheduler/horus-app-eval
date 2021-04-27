@@ -27,7 +27,7 @@
 #include <ix/cfg.h>
 #include <ix/mempool.h>
 #include <ix/ethqueue.h>
-
+#include <ix/log.h>
 #include <net/ip.h>
 #include <net/udp.h>
 
@@ -56,10 +56,16 @@ struct mempool request_mempool __attribute((aligned(64)));
 struct mempool_datastore rq_datastore;
 struct mempool rq_mempool __attribute((aligned(64)));
 
+/*
+ * @parham: This struct holds the packet headers used by Racksched.
+ * TODO: Modify this to be consistent with Falcon headers:
+ * 
+ * 
+*/
 struct message {
         uint8_t type;
         uint16_t seq_num;
-	uint32_t queue_length[3];
+	    uint32_t queue_length[3];
         uint16_t client_id;
         uint32_t req_id;
         uint32_t pkts_length;
@@ -132,6 +138,9 @@ struct fini_request_queue {
 
 struct fini_request_queue frqueue;
 
+/*
+ * @parham: Frees the cell for finished request
+*/
 static inline struct request * request_dequeue(struct fini_request_queue * frq)
 {
         struct fini_request_cell * tmp;
@@ -148,6 +157,9 @@ static inline struct request * request_dequeue(struct fini_request_queue * frq)
         return req;
 }
 
+/*
+ * @parham: This function is used only for handling finished requests! 
+*/
 static inline void request_enqueue(struct fini_request_queue * frq, struct request * req)
 {
         if (unlikely(!req))
@@ -172,7 +184,7 @@ struct task_queue
         struct task * head;
         struct task * tail;
 };
-        
+
 struct task_queue tskq[CFG_MAX_PORTS];
 
 static inline void tskq_enqueue_head(struct task_queue * tq, void * rnbl,
@@ -250,6 +262,11 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
                                      struct request ** req, uint8_t *type,
                                      uint8_t *category, uint64_t *timestamp)
 {
+        /* 
+                @parham: Here CFG (aka config) .num_ports is number of different (isolated) queues to maintain.
+                TODO: Modify num_ports and set it to the number of workers running on the machine.
+                TODO: Then instead of checking all of the tq indices, just check the queues that.
+        */
         int i;
         for (i = 0; i < CFG.num_ports; i++) {
                 if(tskq_dequeue(&tq[i], rnbl_ptr, req, type, category,
@@ -259,6 +276,9 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
         return -1;
 }
 
+/*
+ @parham: smart_tskq_dequeue reads 
+*/
 static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
                                      struct request ** req, uint8_t *type,
                                      uint8_t *category, uint64_t *timestamp,
@@ -268,7 +288,7 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
         uint64_t queue_stamp;
         int index = -1;
         double max = 0;
-
+        
         for (i = 0; i < CFG.num_ports; i++) {
                 ret = get_queue_timestamp(&tq[i], &queue_stamp);
                 if (ret)
@@ -289,6 +309,10 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
         return -1;
 }
 
+/*
+ * @parham: Parses the packet headers: eth, ip, udp.
+ *      Should work with Falcon as well with some modifications. TODO: Modify the msg part  
+*/
 static inline struct request * rq_update(struct request_queue * rq, struct mbuf * pkt)
 {
 	// Quickly parse packet without doing checks
@@ -325,6 +349,7 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
                 rc->next = NULL;
                 rc->prev = NULL;
                 rq->head = rc;
+                log_info("!rq->head NULL\n");
                 return NULL;
         }
 	struct request_cell * cur = rq->head;
@@ -346,6 +371,7 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
 				mempool_free(&rq_mempool, cur);
 				return req;
 			}
+            log_info("in while ret NULL\n");
 			return NULL;
 		}
 		cur = cur->next;
@@ -364,8 +390,10 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
 		rc->next->prev = rc;
 		rc->prev = NULL;
                 rq->head = rc;
+                log_info("cur==NULL\n");
                 return NULL;
         }
+        log_info("last null\n");
         return NULL;
 }
 
@@ -375,3 +403,4 @@ volatile uint32_t queue_length[CFG_MAX_PORTS];
 volatile struct networker_pointers_t networker_pointers;
 volatile struct worker_response worker_responses[MAX_WORKERS];
 volatile struct dispatcher_request dispatcher_requests[MAX_WORKERS];
+
