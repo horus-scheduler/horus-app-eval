@@ -50,6 +50,7 @@
 void do_networking(void)
 {
 	int i, j, num_recv;
+	uint8_t core_id;
 	rqueue.head = NULL;
 	while (1)
 	{
@@ -70,13 +71,17 @@ void do_networking(void)
 		}
 		networker_pointers.free_cnt = 0;
 		j = 0;
+
 		for (i = 0; i < num_recv; i++)
 		{
-			struct request *req = rq_update(&rqueue, recv_mbufs[i]);
+			// @parham: pass worker_id (address) so when parsing our headers in rq_update it will fill it
+			struct request *req = rq_update(&rqueue, recv_mbufs[i], &core_id);
+
 			if (req)
 			{
 				networker_pointers.reqs[j] = req;
-				networker_pointers.types[j] = (uint8_t)recv_type[i];
+				networker_pointers.types[j] = core_id;
+				log_info("core_id: %u\n", (unsigned int) core_id);
 				j++;
 			}
 		}

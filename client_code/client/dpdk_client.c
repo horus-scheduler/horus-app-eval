@@ -176,26 +176,36 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   // init req msg
   Message *req = (Message *)((uint8_t *)eth + sizeof(header_template));
 
+  // eth->d_addr.addr_bytes[0] = 0xF8;
+  // eth->d_addr.addr_bytes[1] = 0xF2;
+  // eth->d_addr.addr_bytes[2] = 0x1E;
+  // eth->d_addr.addr_bytes[3] = 0x13;
+  // eth->d_addr.addr_bytes[4] = 0xCA;
+  // eth->d_addr.addr_bytes[5] = 0xFC;
+
+  // F8:F2:1E:3A:13:ED
+
   eth->d_addr.addr_bytes[0] = 0xF8;
   eth->d_addr.addr_bytes[1] = 0xF2;
   eth->d_addr.addr_bytes[2] = 0x1E;
-  eth->d_addr.addr_bytes[3] = 0x13;
-  eth->d_addr.addr_bytes[4] = 0xCA;
-  eth->d_addr.addr_bytes[5] = 0xFC;
+  eth->d_addr.addr_bytes[3] = 0x3A;
+  eth->d_addr.addr_bytes[4] = 0x13;
+  eth->d_addr.addr_bytes[5] = 0xEC;
+  
   inet_pton(AF_INET, ip_client[client_index], &(ip->src_addr));
   inet_pton(AF_INET, ip_server[server_index], &(ip->dst_addr));
   udp->src_port = htons(src_port + port_offset);
   udp->dst_port = htons(dst_port + port_offset);
-  if (seq_num == 0) {
-    req->type = TYPE_REQ;
-  } else {
-    req->type = TYPE_REQ_FOLLOW;
-  }
 
+  req->pkt_type = PKT_TYPE_NEW_TASK;
+  req->cluster_id = 6;
+  
+  req->src_id = 7;
+  req->dst_id = 1001 + lcore_id;
+  
+  req->qlen = 0;
   req->seq_num = seq_num;
-  req->queue_length[0] = 0;
-  req->queue_length[1] = htonl(0);
-  req->queue_length[2] = 0;
+  
   req->client_id = (client_index + 1 << 3) + lcore_id;
   // req->req_id = req_id;
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];
@@ -252,12 +262,15 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
         res->run_ns = 1;
   }
   latency_results.work_ratios[latency_results.count] = sjrn / res->run_ns;
+  for (int i=0; i < NUM_WORKERS; i++) {
+
+  }
   latency_results.queue_lengths[latency_results.count][0] =
-      res->queue_length[0];
-  latency_results.queue_lengths[latency_results.count][1] =
-      res->queue_length[1];
-  latency_results.queue_lengths[latency_results.count][2] =
-      res->queue_length[2];
+      res->qlen;
+  // latency_results.queue_lengths[latency_results.count][1] =
+  //     res->queue_length[1];
+  // latency_results.queue_lengths[latency_results.count][2] =
+  //     res->queue_length[2];
   latency_results.count++;
   if (reply_run_ns == 0) {
       // long request
@@ -629,7 +642,7 @@ static void custom_init(void) {
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
     latency_results.work_ratios_long =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
-    latency_results.queue_lengths = (uint32_t(*)[3])rte_malloc(
+    latency_results.queue_lengths = (uint32_t(*)[NUM_WORKERS])rte_malloc(
         NULL, sizeof(uint32_t[3]) * MAX_RESULT_SIZE, 0);
     latency_results.reply_run_ns =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);

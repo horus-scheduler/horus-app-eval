@@ -71,12 +71,13 @@ int udp_input(struct mbuf *pkt, struct ip_hdr *iphdr, struct udp_hdr *udphdr)
 #endif /* DEBUG */
 
         uint16_t dst_port = ntoh16(udphdr->dst_port);
-        for (i = 0; i < CFG.num_ports; i++)
-                if (dst_port == CFG.ports[i])
-                        return i;
+        // for (i = 0; i < CFG.num_ports; i++)
+        //         if (dst_port == CFG.ports[i])
+        //                 return i;
+
         if (dst_port == 6666)
             exit(0);
-        return -1;
+        return 0;
 }
 
 static int udp_output(struct mbuf *__restrict pkt,

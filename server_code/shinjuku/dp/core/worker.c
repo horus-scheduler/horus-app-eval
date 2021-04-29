@@ -55,9 +55,6 @@
 
 #include <rte_byteorder.h>
 
-#define TYPE_REQ 1
-#define TYPE_RES 0
-#define PREEMPT_VECTOR 0xf2
 
 __thread ucontext_t uctx_main;
 __thread ucontext_t * cont;

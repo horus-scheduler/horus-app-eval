@@ -9,9 +9,17 @@
  * constants
  */
 
-#define TYPE_REQ 1
-#define TYPE_REQ_FOLLOW 2
-#define TYPE_RES 0
+#define PKT_TYPE_NEW_TASK 0
+#define PKT_TYPE_NEW_TASK_RANDOM 1
+#define PKT_TYPE_TASK_DONE 2
+#define PKT_TYPE_TASK_DONE_IDLE 3
+#define PKT_TYPE_QUEUE_REMOVE 4
+#define PKT_TYPE_SCAN_QUEUE_SIGNAL 5
+#define PKT_TYPE_IDLE_SIGNAL 6
+#define PKT_TYPE_QUEUE_SIGNAL 7
+#define PKT_TYPE_PROBE_IDLE_QUEUE 8
+#define PKT_TYPE_PROBE_IDLE_RESPONSE 9
+#define PKT_TYPE_IDLE_REMOVE 10
 
 #define NB_MBUF 8191
 #define MBUF_SIZE (2048 + sizeof(struct rte_mbuf) + RTE_PKTMBUF_HEADROOM)
@@ -26,6 +34,8 @@
 #define IP_DST "10.1.0.1"
 #define CLIENT_PORT 11234
 #define SERVICE_PORT 1234
+
+#define NUM_WORKERS 4
 
 static const struct rte_eth_conf port_conf = {
     .rxmode =
@@ -66,7 +76,7 @@ typedef struct LatencyResults_ {
   uint64_t *work_ratios;
   uint64_t *work_ratios_short;
   uint64_t *work_ratios_long;
-  uint32_t (*queue_lengths)[3];
+  uint32_t (*queue_lengths)[NUM_WORKERS]; // @parham: TODO fix the latency collection (how many queue_lengths arrays?)
   uint64_t *reply_run_ns;
   size_t count;
   size_t count_short;
@@ -201,9 +211,13 @@ void free_trimodal_dist(TrimodalDist *trimodal_dist) {
 }
 
 typedef struct Message_ {
-  uint8_t type;
-  uint16_t seq_num;
-  uint32_t queue_length[3];
+  uint8_t pkt_type;
+  uint16_t cluster_id;
+  uint16_t src_id;
+  uint16_t dst_id;
+  uint8_t qlen;
+  uint16_t seq_num; // For multi-packet requests
+  // Switch scheduler does not care about the fields below (needed by server scheduler)
   uint16_t client_id;
   uint32_t req_id;
   uint32_t pkts_length;
@@ -532,3 +546,4 @@ static uint64_t timediff_in_us(uint64_t new_t, uint64_t old_t) {
 }
 
 #endif  // UTIL_H_
+

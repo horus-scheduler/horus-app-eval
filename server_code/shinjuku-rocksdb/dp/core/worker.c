@@ -115,15 +115,15 @@ static void test_handler(struct dune_tf *tf)
 static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
                          uint32_t lsw_id)
 {
-        asm volatile ("sti":::);
+    asm volatile ("sti":::);
 
-        struct ip_tuple * id = (struct ip_tuple *) ((uint64_t) msw_id << 32 | lsw_id);
-        void * data = (void *)((uint64_t) msw << 32 | lsw);
-        int ret;
+    struct ip_tuple * id = (struct ip_tuple *) ((uint64_t) msw_id << 32 | lsw_id);
+    void * data = (void *)((uint64_t) msw << 32 | lsw);
+    int ret;
 
-           struct message * req = (struct message *) data;
+    struct message * req = (struct message *) data;
     log_info("Generic work being executed on %d\n", cpu_nr_);
-    log_info("queue_length 0: %d\n", cpu_nr_);
+    log_info("queue_length %d: %d\n", cpu_nr_, queue_length[cpu_nr_]);
 	rocksdb_readoptions_t * readoptions = rocksdb_readoptions_create();
 	rocksdb_iterator_t * iter = rocksdb_create_iterator(db, readoptions);
 
@@ -161,33 +161,34 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
                 i++;
         } while ( i / 0.233 < req->runNs);*/
 
-        /*
-         * @parham: TODO: Modify these reply packet headers to match falcon headers.
-        */
-        asm volatile ("cli":::);
-        struct message resp;
+    /*
+     * @parham: TODO: Modify these reply packet headers to match falcon headers.
+    */
+    asm volatile ("cli":::);
+    struct message resp;
 	resp.genNs = req->genNs;
 	resp.runNs = req->runNs;
-	resp.type = TYPE_RES;
+	resp.pkt_type = PKT_TYPE_TASK_DONE;
 	resp.client_id = req->client_id;
 	resp.req_id = req->req_id;
 
 	int type = dispatcher_requests[cpu_nr_].type;
-	resp.queue_length[0] = rte_cpu_to_be_32(queue_length[type] - 1);
+	resp.qlen = rte_cpu_to_be_32(queue_length[type] - 1);
 
-        struct ip_tuple new_id = {
-                .src_ip = id->dst_ip,
-                .dst_ip = id->src_ip,
-                .src_port = id->dst_port,
-                .dst_port = id->src_port
-        };
 
-        ret = udp_send_one((void *)&resp, sizeof(struct message), &new_id);
-        if (ret)
-                log_warn("udp_send failed with error %d\n", ret);
+    struct ip_tuple new_id = {
+            .src_ip = id->dst_ip,
+            .dst_ip = id->src_ip,
+            .src_port = id->dst_port,
+            .dst_port = id->src_port
+    };
 
-        finished = true;
-        swapcontext_very_fast(cont, &uctx_main);
+    ret = udp_send_one((void *)&resp, sizeof(struct message), &new_id);
+    if (ret)
+            log_warn("udp_send failed with error %d\n", ret);
+
+    finished = true;
+    swapcontext_very_fast(cont, &uctx_main);
 }
 
 static inline void parse_packet(struct mbuf * pkt, void ** data_ptr,

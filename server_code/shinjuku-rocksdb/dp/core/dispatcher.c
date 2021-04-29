@@ -83,31 +83,31 @@ static inline void handle_preempted(int i)
 
 static inline void dispatch_request(int i, uint64_t cur_time)
 {
-        void * rnbl;
+    void * rnbl;
 	struct request * req;
-        uint8_t type, category;
-        uint64_t timestamp;
-        
-        /* 
-        @parham: Pick a task from the queue "tskq"
-        TODO: need to isolate the workers here:
-        Pass the i (cpu core id) to the dequeue function so it can dequeue from the queues that belong to a certian worker
-        TODO: Use naive
-        */
-        if(smart_tskq_dequeue(tskq, &rnbl, &req, &type,
-                              &category, &timestamp, cur_time))
-                return;
-        // @parham: changes the worker stat to RUNNING (Busy) So the parent loop won't call this function no more (until flag changes)
-        worker_responses[i].flag = RUNNING;
-        // @parham: Fill the dispatcher_request array for this worker, with regards to data that we took from taskq
-        dispatcher_requests[i].rnbl = rnbl;
-        dispatcher_requests[i].req = req;
-        dispatcher_requests[i].type = type;
-        dispatcher_requests[i].category = category;
-        dispatcher_requests[i].timestamp = timestamp;
-        timestamps[i] = cur_time;
-        preempt_check[i] = true;
-        dispatcher_requests[i].flag = ACTIVE;
+    uint8_t type, category;
+    uint64_t timestamp;
+    
+    /* 
+    @parham: Pick a task from the queue "tskq"
+    TODO: need to isolate the workers here:
+    Pass the i (cpu core id) to the dequeue function so it can dequeue from the queues that belong to a certian worker
+    TODO: Use naive
+    */
+    if(naive_tskq_dequeue(tskq, &rnbl, &req, &type,
+                          &category, &timestamp, (uint8_t)i))
+            return;
+    // @parham: changes the worker stat to RUNNING (Busy) So the parent loop won't call this function no more (until flag changes)
+    worker_responses[i].flag = RUNNING;
+    // @parham: Fill the dispatcher_request array for this worker, with regards to data that we took from taskq
+    dispatcher_requests[i].rnbl = rnbl;
+    dispatcher_requests[i].req = req;
+    dispatcher_requests[i].type = type;
+    dispatcher_requests[i].category = category;
+    dispatcher_requests[i].timestamp = timestamp;
+    timestamps[i] = cur_time;
+    preempt_check[i] = true;
+    dispatcher_requests[i].flag = ACTIVE;
 }
 
 static inline void preempt_worker(int i, uint64_t cur_time)
