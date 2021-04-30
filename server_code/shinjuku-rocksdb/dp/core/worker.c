@@ -168,13 +168,17 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     struct message resp;
 	resp.genNs = req->genNs;
 	resp.runNs = req->runNs;
-	resp.pkt_type = PKT_TYPE_TASK_DONE;
+
 	resp.client_id = req->client_id;
 	resp.req_id = req->req_id;
-
-	int type = dispatcher_requests[cpu_nr_].type;
-	resp.qlen = rte_cpu_to_be_32(queue_length[type] - 1);
-
+    
+	resp.qlen = queue_length[cpu_nr_] - 1;
+    
+    if (resp.qlen > 0) {
+        resp.pkt_type = PKT_TYPE_TASK_DONE;
+    } else {
+        resp.pkt_type = PKT_TYPE_TASK_DONE_IDLE;
+    }
 
     struct ip_tuple new_id = {
             .src_ip = id->dst_ip,

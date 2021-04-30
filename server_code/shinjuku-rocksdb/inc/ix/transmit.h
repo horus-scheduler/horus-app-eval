@@ -109,7 +109,7 @@ static inline int udp_send_one(void * data, size_t len, struct ip_tuple * id)
 		ret = -RET_AGAIN;
 		goto out;
         }
-
+    log_info("transmit.h: ethhdr->dhost: %lu", ethhdr->dhost);
 	ethhdr->shost = CFG.mac;
 	ethhdr->type = hton16(ETHTYPE_IP);
 

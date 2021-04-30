@@ -49,7 +49,6 @@ char ip_server[][32] = {
     "10.1.0.7", "10.1.0.8", "10.1.0.9", "10.1.0.10", "10.1.0.11", "10.1.0.12",
 };
 
-
 uint16_t src_port = 11234;
 uint16_t dst_port = 1234;
 /* @parham: TODO: in this file modify anywhere that uses req->queue_length[X] we have only one qlen in packet headers */
@@ -76,7 +75,7 @@ LatencyResults latency_results = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 /********* Debug the us *********/
 uint64_t work_ns_sample[1048576] = {0};
 uint32_t sample_idx = 0;
-uint64_t local_type_count[2] = {0};
+
 /*
  * functions called when program ends
  */
@@ -108,10 +107,8 @@ static void dump_stats_to_file() {
 
   FILE *queue_length_ptr = fopen("./results/output.queue_lengths", "w");
   for (int i = 0; i < latency_results.count; i++) {
-    fprintf(queue_length_ptr, "Queue0: %u, Queue1: %u, Queue2: %u\n",
-            latency_results.queue_lengths[i][0],
-            latency_results.queue_lengths[i][1],
-            latency_results.queue_lengths[i][2]);
+    fprintf(queue_length_ptr, "Queue0: %u\n",
+            latency_results.queue_lengths[i][0]);
   }
 
   fclose(output_ptr);
@@ -126,8 +123,7 @@ static void sigint_handler(int sig) {
   printf("Responses/Packets received: %lu\n", pkt_recv);
   printf("Ratio of responses recv/requests sent: %lf\n", req_recv_ratio);
   printf("Ratio of packets recv/packets sent: %lf\n", recv_ratio);
-  printf("local_type_1-4: %lu\n", local_type_count[0]);
-  printf("local_type_5-8: %lu\n", local_type_count[1]);
+  
   fflush(stdout);
   if (is_latency_client > 0) {
     dump_stats_to_file();
@@ -232,14 +228,9 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
 
   // parse header
   Message *res = (Message *)((uint8_t *)eth + sizeof(header_template));
-
+  printf("res->pkt_type: %u, res->qlen: %u", res->pkt_type, res->qlen);
+  
   uint8_t server_idx = ntohl(ip->src_addr) - 167837696;
-  if (server_idx <= 4) {
-      local_type_count[0]++;
-  }
-  else {
-      local_type_count[1]++;
-  }
   // debug
   // printf("client_id:%u, req_id:%u\n",res->client_id, res->req_id);
   uint64_t cur_ns = get_cur_ns();
@@ -596,9 +587,11 @@ static void rx_loop(uint32_t lcore_id) {
   uint32_t i, j, nb_rx;
 
   while (1) {
+    //printf("%u\n", lconf->n_rx_queue);
     for (i = 0; i < lconf->n_rx_queue; i++) {
       nb_rx = rte_eth_rx_burst(lconf->port, lconf->rx_queue_list[i], mbuf_burst,
                                MAX_BURST_SIZE);
+      //printf("nb_rx: %u\n", nb_rx);
       for (j = 0; j < nb_rx; j++) {
         mbuf = mbuf_burst[j];
         rte_prefetch0(rte_pktmbuf_mtod(mbuf, void *));
@@ -642,8 +635,8 @@ static void custom_init(void) {
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
     latency_results.work_ratios_long =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
-    latency_results.queue_lengths = (uint32_t(*)[NUM_WORKERS])rte_malloc(
-        NULL, sizeof(uint32_t[3]) * MAX_RESULT_SIZE, 0);
+    latency_results.queue_lengths = (uint32_t(*)[1])rte_malloc(
+        NULL, sizeof(uint32_t[1]) * MAX_RESULT_SIZE, 0);
     latency_results.reply_run_ns =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
   }

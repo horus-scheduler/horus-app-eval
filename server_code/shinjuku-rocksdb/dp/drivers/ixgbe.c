@@ -310,11 +310,11 @@ static int ixgbe_rx_poll(struct eth_rx_queue *rx)
 		rxqe = &rxq->ring_entries[rxq->head & (rxq->len - 1)];
 
 		/* Check IP checksum calculated by hardware (if applicable) */
-		if (unlikely((rxdp->wb.upper.status_error & IXGBE_RXD_STAT_IPCS) &&
-			     (rxdp->wb.upper.status_error & IXGBE_RXDADV_ERR_IPE))) {
-			log_err("ixgbe: IP RX checksum error, dropping pkt\n");
-			valid_checksum = false;
-		}
+		// if (unlikely((rxdp->wb.upper.status_error & IXGBE_RXD_STAT_IPCS) &&
+		// 	     (rxdp->wb.upper.status_error & IXGBE_RXDADV_ERR_IPE))) {
+		// 	log_err("ixgbe: IP RX checksum error, dropping pkt\n");
+		// 	valid_checksum = false;
+		// }
 
 		// /* Check TCP checksum calculated by hardware (if applicable) */
 		// if (unlikely((rxdp->wb.upper.status_error & IXGBE_RXD_STAT_L4CS) &&
@@ -495,7 +495,7 @@ static int ixgbe_tx_reclaim(struct eth_tx_queue *tx)
 		idx++;
 		nb_desc = idx;
 	}
-
+	
 	txq->head += nb_desc;
 	return (uint16_t)(txq->len + txq->head - txq->tail);
 }
