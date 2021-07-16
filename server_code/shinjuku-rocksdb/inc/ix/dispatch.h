@@ -342,14 +342,16 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
     
     uint8_t type = msg->pkt_type;
     uint16_t seq_num = msg->seq_num;
+    uint16_t cluster_id = msg->cluster_id;
     uint16_t client_id = msg->client_id;
     uint32_t req_id = msg->req_id;
     uint32_t pkts_length = msg->pkts_length / sizeof(struct message);
-    log_info("pkt_type: %u, seq_num: %u, client_id: %u, req_id: %u, pkts_length: %u\n", type, seq_num, client_id, req_id, pkts_length);
+    uint16_t dst_id = msg->dst_id >> 8;
+    log_info("\npkt_type: %u, cluster_id: %u, src_id: %u, dst_id: %u, seq_num: %u, client_id: %u, req_id: %u, pkts_length: %u\n", type, cluster_id, msg->src_id, dst_id, seq_num, client_id, req_id, pkts_length);
     
     *core_id = 0;
     for (int i = 0; i < CFG.num_ports; i++) {
-        if (msg->dst_id == CFG.ports[i]) {
+        if (dst_id == CFG.ports[i]) {
             *core_id = i;
         } 
         
