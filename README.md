@@ -177,7 +177,9 @@ LD_PRELOAD=./deps/opnew/dest/libnew.so ./dp/shinjuku
 ```
 sudo sh -c 'for i in /sys/devices/system/node/node*/hugepages/hugepages-2048kB/nr_hugepages; do echo 4096 > $i; done'
 
+
 #insert kernel module for DPDK NIC driver
+sudo modprobe uio
 sudo insmod $RTE_SDK/$RTE_TARGET/kmod/igb_uio.ko
 
 # Bind NIC 
