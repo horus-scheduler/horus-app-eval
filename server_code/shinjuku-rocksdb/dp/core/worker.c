@@ -169,11 +169,13 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 	resp.genNs = req->genNs;
 	resp.runNs = req->runNs;
 
+    resp.cluster_id = req->cluster_id;
 	resp.client_id = req->client_id;
 	resp.req_id = req->req_id;
     
 	resp.qlen = queue_length[cpu_nr_] - 1;
-    
+    resp.dst_id = (req->src_id<<8);
+
     if (resp.qlen > 0) {
         resp.pkt_type = PKT_TYPE_TASK_DONE;
     } else {
