@@ -1,0 +1,29 @@
+diff --git a/kern/vmx.c b/kern/vmx.c
+index 0aae4d6..728ed60 100644
+--- a/kern/vmx.c
++++ b/kern/vmx.c
+@@ -2171,9 +2171,9 @@ __init int vmx_init(void)
+ 	/* APIC virtualization and posted interrupts */
+ 
+ 	//TODO: Enable intercept for computers that don't support APIC register virtualization
+-	__vmx_disable_intercept_for_msr(msr_bitmap, APIC_BASE_MSR + (APIC_ID >> 4));
++	//__vmx_disable_intercept_for_msr(msr_bitmap, APIC_BASE_MSR + (APIC_ID >> 4));
+ 	//__vmx_disable_intercept_for_msr(msr_bitmap, MSR_X2APIC_ICR);
+-	__vmx_disable_intercept_for_msr(msr_bitmap, APIC_BASE_MSR + (APIC_EOI >> 4));
++	//__vmx_disable_intercept_for_msr(msr_bitmap, APIC_BASE_MSR + (APIC_EOI >> 4));
+ 
+ 	apic_init();
+ 
+diff --git a/libdune/entry.c b/libdune/entry.c
+index 8a60862..bb8fedf 100644
+--- a/libdune/entry.c
++++ b/libdune/entry.c
+@@ -484,7 +484,7 @@ static int do_dune_enter(struct dune_percpu *percpu)
+ 		dune_die();
+ 	}
+ 
+-	dune_apic_init_rt_entry();
++	//dune_apic_init_rt_entry();
+ 
+ 	return 0;
+ }
