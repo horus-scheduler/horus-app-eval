@@ -24,13 +24,14 @@ gateway_addr="10.1.0.1"
 ## to put them in different queues. We use the same feature forisolating the workers running on the server.
 
 ## SAQR: Add the worker IDs that are running on the server. The dst_id in the headers match these worker ID values.  
-#port=[19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
 
-# Balanced Setup:
-port=[17, 18, 19, 20, 21, 22, 23, 24]
+#Balanced Setup:
+port=[49, 50, 51, 52, 53, 54, 55, 56]
 
-# Skewed Setup:
-#port=[33, 34, 35, 36, 37, 38, 39, 40]
+
+#Skewed Setup:
+#port=[73, 74, 75, 76, 77, 78, 79, 80]
+
 
 ## slo : slo(s) in nanoseconds for each request type
 slo=[50,500,5000]
