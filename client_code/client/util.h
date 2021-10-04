@@ -7,6 +7,7 @@
 
 /*
  * constants
+ * SAQR: Packet types defined here:
  */
 
 #define PKT_TYPE_NEW_TASK 0
@@ -35,7 +36,8 @@
 #define CLIENT_PORT 11234
 #define SERVICE_PORT 1234
 
-#define NUM_WORKERS 4
+#define QLEN_ARR_DIMENSION 4
+#define SWAP_UINT16(x) (((x) >> 8) | ((x) << 8))
 
 static const struct rte_eth_conf port_conf = {
     .rxmode =
@@ -76,7 +78,7 @@ typedef struct LatencyResults_ {
   uint64_t *work_ratios;
   uint64_t *work_ratios_short;
   uint64_t *work_ratios_long;
-  uint32_t (*queue_lengths)[NUM_WORKERS]; // @parham: TODO fix the latency collection (how many queue_lengths arrays?)
+  uint32_t (*queue_lengths)[QLEN_ARR_DIMENSION]; 
   uint64_t *reply_run_ns;
   size_t count;
   size_t count_short;
@@ -210,14 +212,17 @@ void free_trimodal_dist(TrimodalDist *trimodal_dist) {
   free((void *)trimodal_dist);
 }
 
+/*
+ * SAQR: Header format and packet structure defined here.
+*/
 typedef struct Message_ {
   uint8_t pkt_type;
   uint16_t cluster_id;
   uint16_t src_id;
   uint16_t dst_id;
-  uint8_t qlen;
+  uint16_t qlen;
   uint16_t seq_num; // For multi-packet requests
-  // Switch scheduler does not care about the fields below (needed by server scheduler)
+  // SAQR: Switch scheduler does not care about the fields below (needed by server scheduler)
   uint16_t client_id;
   uint32_t req_id;
   uint32_t pkts_length;

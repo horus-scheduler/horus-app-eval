@@ -27,9 +27,15 @@
 
 #include "util.h"
 
+
 /*
- * constants
- */
+ * SAQR: Defines the ID of spine scheduler (each scheduler has a unique static ID),
+  should be the same as ID set in p4 code for spine.
+*/
+#define SPINE_SCHEDULER_ID 100
+// SAQR: Defines ID of this client (each client has a unique ID), so that reply packet is forwarded correctly to the 
+// client that initiated the request. MAC address and this ID are configured in controller of switches.
+#define CLIENT_ID 110
 
 #define NUM_PKTS 1
 #define MAX_RESULT_SIZE 16777216UL  // 2^24
@@ -49,22 +55,22 @@ char ip_server[][32] = {
     "10.1.0.7", "10.1.0.8", "10.1.0.9", "10.1.0.10", "10.1.0.11", "10.1.0.12",
 };
 
-uint16_t src_port = 11234;
+// SAQR: Example of reserved port used for identifying Saqr headers by the switches (dst_port)
+uint16_t src_port = 1234;
 uint16_t dst_port = 1234;
-/* @parham: TODO: in this file modify anywhere that uses req->queue_length[X] we have only one qlen in packet headers */
 
 /********* Custom parameters *********/
 int is_latency_client = 0;   // 0 means batch client, 1 means latency client
 uint32_t client_index = 11;  // default client: netx12
 uint32_t server_index = 0;   // default server: netx1
-uint32_t qps = 100000;       // default qps: 100000
+uint32_t qps = 20000;       // default qps: 100000
 char *dist_type = "fixed";   // default dist: fixed
 uint32_t scale_factor = 1;   // 1 means the mean is 1us; mean = 1 * scale_factor
 uint32_t is_rocksdb = 0; // 1 means testing with rocksdb, 0 means testing with synthetic workload
-
+char *run_name;
 /********* Packet related *********/
 uint32_t req_id = 0;
-int max_req_id = (1<<25)-1;
+int max_req_id = 1000;
 uint32_t req_id_core[8] = {0};
 
 /********* Results *********/
@@ -82,37 +88,63 @@ uint32_t sample_idx = 0;
 
 static void dump_stats_to_file() {
   size_t count = latency_results.count;
+  char output_name_base[100];
+  char output_name[200];
+  
+  sprintf(output_name_base, "./results/output_%s_%s_%u", run_name, dist_type, qps);
+  FILE *output_ptr = fopen(output_name_base, "wb");
+  
+  sprintf(output_name, "%s.reply_ns", output_name_base);
+  FILE *output_reply_ns_ptr = fopen(output_name, "wb");
 
-  FILE *output_ptr = fopen("./results/output", "wb");
-  fwrite(latency_results.sjrn_times, sizeof(latency_results.sjrn_times),
-         latency_results.count, output_ptr);
-  FILE *output_reply_ns_ptr = fopen("./results/output.reply_ns", "wb");
-  fwrite(latency_results.reply_run_ns, sizeof(latency_results.reply_run_ns),
-         latency_results.count, output_reply_ns_ptr);
-  FILE *output_ptr_short = fopen("./results/output.short", "wb");
-  fwrite(latency_results.sjrn_times_short, sizeof(latency_results.sjrn_times_short),
-         latency_results.count_short, output_ptr_short);
-  FILE *output_ptr_long = fopen("./results/output.long", "wb");
-  fwrite(latency_results.sjrn_times_long, sizeof(latency_results.sjrn_times_long),
-        latency_results.count_long, output_ptr_long);
-  FILE *ratio_ptr = fopen("./results/output.ratios", "wb");
-  fwrite(latency_results.work_ratios, sizeof(latency_results.work_ratios),
-         latency_results.count, ratio_ptr);
-  FILE *ratio_ptr_short = fopen("./results/output.ratios.short", "wb");
-  fwrite(latency_results.work_ratios_short, sizeof(latency_results.work_ratios_short),
-         latency_results.count_short, ratio_ptr_short);
-  FILE *ratio_ptr_long = fopen("./results/output.ratios.long", "wb");
-  fwrite(latency_results.work_ratios_long, sizeof(latency_results.work_ratios_long),
-        latency_results.count_long, ratio_ptr_long);
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.short", output_name_base);
+  FILE *output_ptr_short = fopen(output_name, "wb");
 
-  FILE *queue_length_ptr = fopen("./results/output.queue_lengths", "w");
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.long", output_name_base);
+  FILE *output_ptr_long = fopen(output_name, "wb");
+  
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.ratios", output_name_base);
+  FILE *ratio_ptr = fopen(output_name, "wb");
+  
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.ratios_short", output_name_base);
+  FILE *ratio_ptr_short = fopen(output_name, "wb");
+  
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.ratios_long", output_name_base);
+  FILE *ratio_ptr_long = fopen(output_name, "wb");
+  
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.queue_lengths", output_name_base);
+  FILE *queue_length_ptr = fopen(output_name, "wb");
+
   for (int i = 0; i < latency_results.count; i++) {
-    fprintf(queue_length_ptr, "Queue0: %u\n",
-            latency_results.queue_lengths[i][0]);
+    fprintf(queue_length_ptr, "%u\n",latency_results.queue_lengths[i][0]);
+    fprintf(output_ptr, "%lu\n", latency_results.sjrn_times[i]);
+    fprintf(output_reply_ns_ptr, "%lu\n", latency_results.reply_run_ns[i]);
+    fprintf(ratio_ptr, "%lu\n", latency_results.work_ratios[i]);
+    
+    if (latency_results.count_short > i){
+      fprintf(output_ptr_short, "%lu\n", latency_results.sjrn_times_short[i]);
+      fprintf(ratio_ptr_short, "%lu\n", latency_results.work_ratios_short[i]);
+    }
+    
+    if (latency_results.count_long > i){
+      fprintf(output_ptr_long, "%lu\n", latency_results.sjrn_times_long[i]);
+      fprintf(ratio_ptr_long, "%lu\n", latency_results.work_ratios_long[i]);
+    }
   }
 
+  fclose(queue_length_ptr);
+  fclose(output_ptr_short);
+  fclose(output_ptr_long);
   fclose(output_ptr);
   fclose(ratio_ptr);
+  fclose(ratio_ptr_long);
+  fclose(ratio_ptr_short);
 }
 
 static void sigint_handler(int sig) {
@@ -144,8 +176,7 @@ static void sigint_handler(int sig) {
  * functions
  */
 /*
- * @parham: They use lcores to emulate multiple clients (note that client id is summed up by lcore offset)
- * port_offset given as input is used for diffrentiating task/request type at the server. 
+ * INFO: Generates a request (i.e., task) packet
 */
 static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
                             uint16_t seq_num, uint32_t pkts_length,
@@ -186,34 +217,37 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   eth->d_addr.addr_bytes[2] = 0x1E;
   eth->d_addr.addr_bytes[3] = 0x3A;
   eth->d_addr.addr_bytes[4] = 0x13;
-  eth->d_addr.addr_bytes[5] = 0xEC;
+  eth->d_addr.addr_bytes[5] = 0x00;
   
   inet_pton(AF_INET, ip_client[client_index], &(ip->src_addr));
   inet_pton(AF_INET, ip_server[server_index], &(ip->dst_addr));
   udp->src_port = htons(src_port + port_offset);
   udp->dst_port = htons(dst_port + port_offset);
 
-  req->pkt_type = PKT_TYPE_NEW_TASK;
-  req->cluster_id = 6;
+  req->pkt_type = PKT_TYPE_NEW_TASK; // SAQR: Packet type for a task to be scheduled
+  req->cluster_id = 0 << 8; // SAQR: In our testbed experiments we assume workers are on cluster_id=0
   
-  req->src_id = 7;
-  req->dst_id = 1001 + lcore_id;
+  /* 
+   * SAQR: Arbitrary source (different clients use different codes)
+  */
+  req->src_id = 7; 
+  req->dst_id = SPINE_SCHEDULER_ID << 8;
   
   req->qlen = 0;
   req->seq_num = seq_num;
   
-  req->client_id = (client_index + 1 << 3) + lcore_id;
-  // req->req_id = req_id;
+  // SAQR: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
+  req->client_id = (CLIENT_ID<<8);
+  
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];
   req->pkts_length = pkts_length;
-  req->gen_ns = gen_ns;
-  req->run_ns = run_ns;
+  req->gen_ns = gen_ns; // INFO: Req generation time (for calculations)
+  req->run_ns = run_ns; // INFO: Defines the type of task (used in worker to identify the work to be done)
   // printf("request client_id: %u, req_id: %u\n",req->client_id,req->req_id);
   mbuf->data_len += sizeof(Message);
   mbuf->pkt_len += sizeof(Message);
 
   pkt_sent++;
-  printf("sent cnt: %lu\n", pkt_sent);
 }
 
 static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
@@ -228,7 +262,7 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
 
   // parse header
   Message *res = (Message *)((uint8_t *)eth + sizeof(header_template));
-  printf("res->pkt_type: %u, res->qlen: %u", res->pkt_type, res->qlen);
+  //printf("res->pkt_type: %u, res->qlen: %u", res->pkt_type, res->qlen);
   
   uint8_t server_idx = ntohl(ip->src_addr) - 167837696;
   // debug
@@ -240,28 +274,23 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   assert(cur_ns > res->gen_ns);
   uint64_t sjrn = cur_ns - res->gen_ns;  // diff in time
   latency_results.sjrn_times[latency_results.count] = sjrn;
+  //printf("\nresponse time: %u\n", sjrn);
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
   
-  if (is_rocksdb == 1) {
+  if (is_rocksdb == 1) { // INFO: Used for calculating ratio of response time to actual task running time (note: scheduler is not aware of the actual running times)
       if (res->run_ns == 0)
-        res->run_ns = 780000;
+        res->run_ns = 650000;
       else
-        res->run_ns = 50000;
+        res->run_ns = 40000;
   }
   else {
       if (res->run_ns == 0)
         res->run_ns = 1;
   }
   latency_results.work_ratios[latency_results.count] = sjrn / res->run_ns;
-  for (int i=0; i < NUM_WORKERS; i++) {
-
-  }
+  
   latency_results.queue_lengths[latency_results.count][0] =
-      res->qlen;
-  // latency_results.queue_lengths[latency_results.count][1] =
-  //     res->queue_length[1];
-  // latency_results.queue_lengths[latency_results.count][2] =
-  //     res->queue_length[2];
+      (res->qlen) >> 8;
   latency_results.count++;
   if (reply_run_ns == 0) {
       // long request
@@ -479,7 +508,7 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
       if (work_ns == work_1_ns) {
         generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
       } else if (work_ns == work_2_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 1);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
       }
       enqueue_pkt(lcore_id, mbuf);
     }
@@ -634,9 +663,9 @@ static void custom_init(void) {
     latency_results.work_ratios_short =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
     latency_results.work_ratios_long =
-        (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
-    latency_results.queue_lengths = (uint32_t(*)[1])rte_malloc(
-        NULL, sizeof(uint32_t[1]) * MAX_RESULT_SIZE, 0);
+        (uint64_t *)rte_malloc(NULL, sizeof(uint16_t) * MAX_RESULT_SIZE, 0);
+    latency_results.queue_lengths = (uint64_t(*)[1])rte_malloc(
+        NULL, sizeof(uint64_t[1]) * MAX_RESULT_SIZE, 0);
     latency_results.reply_run_ns =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
   }
@@ -651,7 +680,7 @@ static void custom_init(void) {
 static void parse_client_args_help(char *program_name) {
   fprintf(stderr,
           "Usage: %s -l <WORKING_CORES> -- -l <IS_LATENCY_CLIENT> -c "
-          "<CLIENT_ID> -s <SERVER_ID> -d "
+          "<CLIENT_IDX> -s <SERVER_ID> -d "
           "<DIST_TYPE> -q "
           "<QPS_PER_CORE>\n",
           program_name);
@@ -659,7 +688,7 @@ static void parse_client_args_help(char *program_name) {
 
 static int parse_client_args(int argc, char **argv) {
   int opt, num;
-  while ((opt = getopt(argc, argv, "l:c:s:d:q:x:r:")) != -1) {
+  while ((opt = getopt(argc, argv, "l:c:s:d:q:x:r:n:")) != -1) {
     switch (opt) {
       case 'l':
         num = atoi(optarg);
@@ -687,6 +716,9 @@ static int parse_client_args(int argc, char **argv) {
       case 'r':
         num = atoi(optarg);
         is_rocksdb = num;
+      case 'n':
+        run_name = optarg;
+
       break;
       default:
         parse_client_args_help(argv[0]);
@@ -700,7 +732,7 @@ static int parse_client_args(int argc, char **argv) {
   printf("Server (dst): %s\n", ip_server[server_index]);
   printf("Type of distribution: %s\n", dist_type);
   printf("QPS per core: %" PRIu32 "\n\n", qps);
-
+  printf("Result save name: %s\n", run_name);
   return 0;
 }
 

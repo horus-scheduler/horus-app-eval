@@ -27,14 +27,21 @@ if __name__ == '__main__':
     def getLatPct(typeOfLats, latsFile):
         assert os.path.exists(latsFile)
 
-        latsObj = Lat(latsFile)
+        #latsObj = Lat(latsFile)
         if typeOfLats == '--latency':
             # qTimes = [l/1e6 for l in latsObj.parseQueueTimes()]
             # svcTimes = [l/1e6 for l in latsObj.parseSvcTimes()]
-            sjrnTimes = [l/1e3 for l in latsObj.parseSojournTimes()]
-
-            p99 = stats.scoreatpercentile(sjrnTimes, 99)
-            print(p99)
+            result = values = np.genfromtxt(latsFile, delimiter='\n')
+            result = result[1000:]
+            sjrnTimes = [l/1e3 for l in result]
+            #print(sjrnTimes)
+            p99 = np.percentile(sjrnTimes, 99)
+            p50 = np.percentile(sjrnTimes, 50)
+            maximum = max(sjrnTimes)
+            print("99th percentile: " + str(p99))
+            print("median: " + str(p50))
+            #print(maximum)
+            print("mean: " + str(np.mean(sjrnTimes)))
         elif typeOfLats == '--slowdown':
             sjrnTimes = [l for l in latsObj.parseSojournTimes()]
 
