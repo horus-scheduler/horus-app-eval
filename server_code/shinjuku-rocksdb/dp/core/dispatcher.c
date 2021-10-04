@@ -51,13 +51,24 @@ static void preempt_check_init(int num_workers)
 
 static inline void handle_finished(int i)
 {
-        if (worker_responses[i].req == NULL)
-                log_warn("No mbuf was returned from worker\n");
-        context_free(worker_responses[i].rnbl);
-	--queue_length[worker_responses[i].type];
-        request_enqueue(&frqueue, (struct request *) worker_responses[i].req);
-        preempt_check[i] = false;
-        worker_responses[i].flag = PROCESSED;
+    uint8_t core_id;
+    if (worker_responses[i].req == NULL)
+            log_warn("No mbuf was returned from worker\n");
+    context_free(worker_responses[i].rnbl);
+    core_id = worker_responses[i].type;
+    // SAQR: Task finished, decrement worker queue len
+    --queue_length[core_id];
+    /* 
+     * SAQR: If the worker were previously removed from the idle list of leaf,
+      when it became idle we sent an TASK_DONE_IDLE reply (in worker.c)
+     * Here we change the state  
+    */
+    if (queue_length[core_id] == 0 && (worker_state[core_id] > 0)){
+        worker_state[core_id] -= 1;
+    }
+    request_enqueue(&frqueue, (struct request *) worker_responses[i].req);
+    preempt_check[i] = false;
+    worker_responses[i].flag = PROCESSED;
 }
 
 static inline void handle_preempted(int i)
@@ -89,17 +100,19 @@ static inline void dispatch_request(int i, uint64_t cur_time)
     uint64_t timestamp;
     
     /* 
-    @parham: Pick a task from the queue "tskq"
-    TODO: need to isolate the workers here:
-    Pass the i (cpu core id) to the dequeue function so it can dequeue from the queues that belong to a certian worker
-    TODO: Use naive
+     * SAQR:
+     * Pick a task from the queue "tskq"
+     * Isolating worker queues is done here
+     * Pass the i (cpu core id) to the dequeue function so it can dequeue from the queue that belong to a certian worker
+     * We use naive_tskq_dequeue instead of smart_tskq_dequeue since we do not assume prior knowledge about task type and SLOs (smart_tskq_dequeue is SLO based). 
+     * Can be modified in other cases if task types are known
     */
     if(naive_tskq_dequeue(tskq, &rnbl, &req, &type,
                           &category, &timestamp, (uint8_t)i))
             return;
-    // @parham: changes the worker stat to RUNNING (Busy) So the parent loop won't call this function no more (until flag changes)
+    // NOTE: changes the worker stat to RUNNING (Busy) So the parent loop won't call this function no more (until flag changes)
     worker_responses[i].flag = RUNNING;
-    // @parham: Fill the dispatcher_request array for this worker, with regards to data that we took from taskq
+    // NOTE: Fill the dispatcher_request array for this worker, with regards to data that we took from taskq
     dispatcher_requests[i].rnbl = rnbl;
     dispatcher_requests[i].req = req;
     dispatcher_requests[i].type = type;
@@ -121,7 +134,7 @@ static inline void preempt_worker(int i, uint64_t cur_time)
 
 static inline void handle_worker(int i, uint64_t cur_time)
 {
-        if (worker_responses[i].flag != RUNNING) { // @parham: Worker is not executing anything...
+        if (worker_responses[i].flag != RUNNING) { // NOTE: Worker is not executing anything...
                 if (worker_responses[i].flag == FINISHED) {
                         handle_finished(i);
                 } else if (worker_responses[i].flag == PREEMPTED) {
@@ -134,14 +147,14 @@ static inline void handle_worker(int i, uint64_t cur_time)
 }
 
 /*
- * @parham: The networker_pointers elements are added by networker.c do_networking().
+ * NOTE: The networker_pointers elements are added by networker.c do_networking().
  * Here this function takes those elements and enqueues task objects into the taskq[] 
- * Racksched has different tasqs for types of packets, we will use these different queues for different workers/vclusters?
+ * Racksched has different tasqs for types of packets, we use these different queues for different workers
 */
 static inline void handle_networker(uint64_t cur_time)
 {
         int i, ret;
-        uint8_t type;
+        uint8_t core_id;
         ucontext_t * cont;
 
         if (networker_pointers.cnt != 0) {
@@ -152,11 +165,20 @@ static inline void handle_networker(uint64_t cur_time)
                                 request_enqueue(&frqueue, networker_pointers.reqs[i]);
                                 continue;
                         }
-                        type = networker_pointers.types[i];
-			++queue_length[type];
-                        tskq_enqueue_tail(&tskq[type], cont,
+                        core_id = networker_pointers.types[i];
+			            // SAQR: increment worker queue len 
+                        ++queue_length[core_id];
+                        struct request *req = networker_pointers.reqs[i];
+                        //log_info("WORKER %d REQTYPE %d", core_id, req->type);
+                        if (req->type == WORKER_STATE_IDLE && worker_state[core_id] == 0) { 
+                            // SAQR: WORKER_STATE_IDLE means leaf selected this worker based on idle selection.
+                            // Therfore, leaf scheduler just poped this worker from its idle list. 
+                            // We keep this state so worker will re-send an idle signal when idle (in worker.c)
+                            worker_state[core_id] = 1;
+                        }
+                        tskq_enqueue_tail(&tskq[core_id], cont,
                                           networker_pointers.reqs[i],
-                                          type, PACKET, cur_time);
+                                          core_id, PACKET, cur_time);
                 }
 
                 for (i = 0; i < ETH_RX_MAX_BATCH; i++) {
@@ -172,7 +194,7 @@ static inline void handle_networker(uint64_t cur_time)
 
 /**
  * do_dispatching - implements dispatcher core's main loop
- * @parham: This is the main loop:
+ * NOTE: This is the main loop:
  *      Calls "handle_networker()" which enqueues the requests received (from networker.c which calls ethernet recv) to tasq array. 
  *      Calls "handle_worker()" for each worker core. The handle_worker() will try to dequeue from tasq and dispatch for that so it will run it (worker.c).
  */
@@ -183,7 +205,7 @@ void do_dispatching(int num_cpus)
 
         preempt_check_init(num_cpus - 2);
         timestamp_init(num_cpus - 2);
-
+        
         while(1) {
                 cur_time = rdtsc();
                 for (i = 0; i < num_cpus - 2; i++)

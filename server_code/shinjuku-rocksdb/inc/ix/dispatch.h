@@ -59,6 +59,10 @@
 #define PKT_TYPE_PROBE_IDLE_RESPONSE 9
 #define PKT_TYPE_IDLE_REMOVE 10
 
+#define WORKER_STATE_IDLE 1
+#define WORKER_STATE_BUSY 0
+#define SWAP_UINT16(x) (((x) >> 8) | ((x) << 8))
+
 struct mempool_datastore task_datastore;
 struct mempool task_mempool __attribute((aligned(64)));
 struct mempool_datastore fini_request_cell_datastore;
@@ -68,18 +72,24 @@ struct mempool request_mempool __attribute((aligned(64)));
 struct mempool_datastore rq_datastore;
 struct mempool rq_mempool __attribute((aligned(64)));
 
+uint32_t got_idles;
+uint32_t sent_idles;
+uint32_t max_queue_wait;
+volatile uint32_t queue_length[CFG_MAX_PORTS];
+
 /*
- * @parham: This struct holds the packet headers used by Racksched.
- * TODO: Modify this to be consistent with Falcon headers:
- * 
- * 
+ * SAQR: def
+ * Saqr packet header strcture defined here as well as the application specific fields (e.g client_id, runNs, etc.)
+ * runNs: Defines the type of task to be executed (e.g GET, SCAN) this behaviour is
+   implemented in generic work function in worker.c
+ * genNs: Timestamp of the generated task by the client (only used for measuring response time)
 */
 struct message {
     uint8_t pkt_type;
     uint16_t cluster_id;
     uint16_t src_id;
     uint16_t dst_id;
-    uint8_t qlen;
+    uint16_t qlen;
     uint16_t seq_num; // For multi-packet requests
     // Switch scheduler does not care about the fields below (needed by server scheduler)
     uint16_t client_id;
@@ -154,6 +164,15 @@ struct fini_request_queue {
 
 struct fini_request_queue frqueue;
 
+/* 
+ * SAQR: In worker_state we maintain the idleness view about workers in leaf worker recived a pkt with qlen==1, it means
+   that state in switch is now busy (just removed from idle list). So next time it becomes idle it sends TASK_DONE_IDLE 
+   so leaf adds the worker to the idle list.
+ */
+volatile uint32_t worker_state[CFG_MAX_PORTS];
+
+
+
 /*
  * @parham: Frees the cell for finished request
 */
@@ -174,7 +193,7 @@ static inline struct request * request_dequeue(struct fini_request_queue * frq)
 }
 
 /*
- * @parham: This function is used only for handling finished requests! 
+ * @parham: This function is used only for handling finished requests
 */
 static inline void request_enqueue(struct fini_request_queue * frq, struct request * req)
 {
@@ -279,9 +298,10 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
                                      uint8_t *category, uint64_t *timestamp, uint8_t core_id)
 {
         /* 
-                @parham: Here CFG (aka config) .num_ports is number of different (isolated) queues to maintain.
-                TODO: Modify num_ports and set it to the number of workers running on the machine.
-                TODO: Then instead of checking all of the tq indices, just check the queues that.
+         * SAQR
+         * "type" param previously used by Shinjuku to put different task types in dedicated queues 
+         * We use the same idea for isolating task queues of different workers
+         * dequeue from the worker queue (type param here indicates the queue number)
         */
         
         if(tskq_dequeue(&tq[core_id], rnbl_ptr, req, type, category,
@@ -326,7 +346,7 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
 
 /*
  * @parham: Parses the packet headers: eth, ip, udp.
- *      Should work with Falcon as well with some modifications. TODO: Modify the msg part  
+ * modified to work with Saqr headers and support core-granular scheduling (schedulers select a worker for task not server)
 */
 static inline struct request * rq_update(struct request_queue * rq, struct mbuf * pkt, uint8_t *core_id)
 {
@@ -340,23 +360,35 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
     void * data = mbuf_nextd(udphdr, void *);
     struct message * msg = (struct message *) data;
     
-    uint8_t type = msg->pkt_type;
+    /* 
+     * SAQR: Line below contains decision type tag (0|1) which indicates that leaf selected this worker based on 
+      Idle selection (1) or not (0).
+    */
+    uint16_t type = SWAP_UINT16(msg->qlen);
     uint16_t seq_num = msg->seq_num;
     uint16_t cluster_id = msg->cluster_id;
     uint16_t client_id = msg->client_id;
     uint32_t req_id = msg->req_id;
     uint32_t pkts_length = msg->pkts_length / sizeof(struct message);
-    uint16_t dst_id = msg->dst_id >> 8;
-    log_info("\npkt_type: %u, cluster_id: %u, src_id: %u, dst_id: %u, seq_num: %u, client_id: %u, req_id: %u, pkts_length: %u\n", type, cluster_id, msg->src_id, dst_id, seq_num, client_id, req_id, pkts_length);
+    if (pkts_length == 0)
+        pkts_length = 1; // Minimum 1 packet per task
+    // SAQR: To make it consistent with shinjuku conf, worker IDs start from 1 (in switch we use 0 based index)
+    uint16_t dst_id = SWAP_UINT16(msg->dst_id) + 1; 
+    //log_info("\npkt_type: %u, cluster_id: %u, src_id: %u, dst_id: %u, seq_num: %u, client_id: %u, req_id: %u, pkts_length: %u, queue_len: %u\n", type, cluster_id, msg->src_id, dst_id, seq_num, client_id, req_id, pkts_length, msg->qlen);
     
+    /* 
+     * SAQR: Here we find out the physical core based on the shinjuku configuration and info in pkt:
+     * The packet dst_id contains the ID of worker. 
+     * In shinjuku.conf We use the *port=[]* to indicate worker IDs each of which maps to one of the CPUs 
+     * Here we check and match the dst_id with the worker ID and use that index to set core_id. 
+    */
     *core_id = 0;
     for (int i = 0; i < CFG.num_ports; i++) {
         if (dst_id == CFG.ports[i]) {
             *core_id = i;
         } 
-        
     }
-
+    
     if (pkts_length == 1) {
         struct request * req = mempool_alloc(&request_mempool);
         req->type = type;
@@ -427,7 +459,7 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
 
 uint64_t timestamps[MAX_WORKERS];
 uint8_t preempt_check[MAX_WORKERS];
-volatile uint32_t queue_length[CFG_MAX_PORTS];
+
 volatile struct networker_pointers_t networker_pointers;
 volatile struct worker_response worker_responses[MAX_WORKERS];
 volatile struct dispatcher_request dispatcher_requests[MAX_WORKERS];

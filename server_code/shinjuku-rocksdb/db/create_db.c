@@ -8,7 +8,7 @@
 #include <unistd.h>  // sysconf() - get CPU count
 
 /*
- * @parham: This file prepares a db in server. The other ones will only open (load) this db and manipulate (based on request pkts)
+ * NOTE: This file prepares a db in worker side. The workers will only open (load) this db and manipulate (based on request pkts)
 */
 const char DBPath[] = "./my_db";
 

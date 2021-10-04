@@ -122,17 +122,19 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     int ret;
 
     struct message * req = (struct message *) data;
-    log_info("Generic work being executed on %d\n", cpu_nr_);
-    log_info("queue_length %d: %d\n", cpu_nr_, queue_length[cpu_nr_]);
+    // log_info("Generic work being executed on %d\n", cpu_nr_);
+    // log_info("queue_length %d: %d\n", cpu_nr_, queue_length[cpu_nr_]);
+    // log_info("worker_state %d: %d\n", cpu_nr_, worker_state[cpu_nr_]);
 	rocksdb_readoptions_t * readoptions = rocksdb_readoptions_create();
 	rocksdb_iterator_t * iter = rocksdb_create_iterator(db, readoptions);
 
 	int counter = 0;
-        /*
-         * @parham: Just a trick to have different functionalities at server for rocksdb experiments. 
-         * Client sends runNs 500 for GET and 0 for SCAN functions.
-        */
+    /*
+     * @parham: different tasks at worker based on runNs (set by client). 
+     * Client sends runNs 500 for GET and 0 for SCAN functions.
+    */
 	if (req->runNs > 0) {
+        //log_info("\nRUNS 0\n");
 		size_t long_size;
 		char long_key[8];
                 snprintf(long_key, 8, "long_key");
@@ -144,26 +146,27 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 			free(long_val);
 		}
 	} else {
-	for (rocksdb_iter_seek_to_first(iter); rocksdb_iter_valid(iter); rocksdb_iter_next(iter)) {
-		char * retr_key;
-		size_t klen;
-		retr_key = rocksdb_iter_key(iter, &klen);
-		if (req->runNs > 0 && ++counter > 300)
-			break;
-	}
+        //log_info("\nRUNS 1\n");
+    	for (rocksdb_iter_seek_to_first(iter); rocksdb_iter_valid(iter); rocksdb_iter_next(iter)) {
+    		char * retr_key;
+    		size_t klen;
+    		retr_key = rocksdb_iter_key(iter, &klen);
+    		if (req->runNs > 0 && ++counter > 5000)
+    			break;
+    	}
 	}
 	rocksdb_iter_destroy(iter);
 	rocksdb_readoptions_destroy(readoptions);
-	/*
+	/* 
+     * For synthetic workloads (generate different service times) use below:
         uint64_t i = 0;
         do {
                 asm volatile ("nop");
                 i++;
-        } while ( i / 0.233 < req->runNs);*/
-
-    /*
-     * @parham: TODO: Modify these reply packet headers to match falcon headers.
+        } while ( i / 0.233 < req->runNs);
     */
+
+    
     asm volatile ("cli":::);
     struct message resp;
 	resp.genNs = req->genNs;
@@ -172,15 +175,30 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     resp.cluster_id = req->cluster_id;
 	resp.client_id = req->client_id;
 	resp.req_id = req->req_id;
-    
-	resp.qlen = queue_length[cpu_nr_] - 1;
-    resp.dst_id = (req->src_id<<8);
+    uint16_t new_qlen;
+    // SAQR: Set the latest worker qlen of the worker core in header field
+    new_qlen = queue_length[cpu_nr_] - 1;
+    resp.qlen = new_qlen;
 
-    if (resp.qlen > 0) {
-        resp.pkt_type = PKT_TYPE_TASK_DONE;
+    // SAQR: Sending reply back to the client:
+    resp.src_id = (req->dst_id);
+    resp.dst_id = (req->client_id);
+    
+    // SAQR: Leaf does not have this worker in its idle list and it became idle;
+    // use PKT_TYPE_TASK_DONE_IDLE so that leaf add the worker to idle list. 
+    if (new_qlen == 0 && (worker_state[cpu_nr_] > 0)) { 
+        resp.pkt_type = PKT_TYPE_TASK_DONE_IDLE; 
+        //log_info("worker IDLE %d: %d\n", cpu_nr_, worker_state[cpu_nr_]);
+        // sent_idles += 1;
+        // log_info("sent_idles: %u", sent_idles); 
     } else {
-        resp.pkt_type = PKT_TYPE_TASK_DONE_IDLE;
+        resp.pkt_type = PKT_TYPE_TASK_DONE;
     }
+    // if (resp.qlen > 0) {
+    //     resp.pkt_type = PKT_TYPE_TASK_DONE;
+    // } else if (resp.qlen == 0 && req->qlen==0){
+    //     resp.pkt_type = PKT_TYPE_TASK_DONE_IDLE;
+    // }
 
     struct ip_tuple new_id = {
             .src_ip = id->dst_ip,
@@ -189,9 +207,10 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
             .dst_port = id->src_port
     };
 
-    ret = udp_send_one((void *)&resp, sizeof(struct message), &new_id);
+    resp.qlen = SWAP_UINT16(resp.qlen); 
+    ret = udp_send_one((void *)&resp, sizeof(struct message), &new_id); // SAQR: Send reply
     if (ret)
-            log_warn("udp_send failed with error %d\n", ret);
+        log_warn("udp_send failed with error %d\n", ret);
 
     finished = true;
     swapcontext_very_fast(cont, &uctx_main);
@@ -228,6 +247,7 @@ static inline void init_worker(void)
 {
         cpu_nr_ = percpu_get(cpu_nr) - 2;
         worker_responses[cpu_nr_].flag = PROCESSED;
+        worker_state[cpu_nr_] = 0; // SAQR: Initial state of all workers are 0 (in idle list of leaf)
         dune_register_intr_handler(PREEMPT_VECTOR, test_handler);
         eth_process_reclaim();
         asm volatile ("cli":::);

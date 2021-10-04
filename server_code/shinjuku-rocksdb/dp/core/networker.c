@@ -51,6 +51,7 @@ void do_networking(void)
 {
 	int i, j, num_recv;
 	uint8_t core_id;
+	
 	rqueue.head = NULL;
 	while (1)
 	{
@@ -74,14 +75,14 @@ void do_networking(void)
 
 		for (i = 0; i < num_recv; i++)
 		{
-			// @parham: pass worker_id (address) so when parsing our headers in rq_update it will fill it
+			// @SAQR: pass core_id by ref so when parsing Saqr headers in rq_update, it will fill it based on dst_id
 			struct request *req = rq_update(&rqueue, recv_mbufs[i], &core_id);
 
 			if (req)
 			{
 				networker_pointers.reqs[j] = req;
-				networker_pointers.types[j] = core_id;
-				log_info("core_id: %u\n", (unsigned int) core_id);
+				networker_pointers.types[j] = core_id; // core_id makes task to be queued in its dedicated queue (each worker has its queue)
+				//log_info("core_id: %u\n", (unsigned int) core_id);
 				j++;
 			}
 		}
