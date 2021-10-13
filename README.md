@@ -90,7 +90,7 @@ The "after_boot.sh" script should be run after each reboot.  It adds the kernel 
 
 
 
-## Setting up Clients
+# Setting up Clients
 > This is only needed for the machine that runs DPDK client.
 
 Setup the DPDK environments variables (or alternatively, add them permanently):
@@ -111,23 +111,90 @@ cd ./client_code/client/
 make
 ```
 
-## Worker Placement Setups
-### Balanced/Uniform Setup
-![Worker Setup Uniform](./figs/placement_uniform.png)
-
-### Skewed Setup
-![Worker Setup Skewed](./figs/placement_skewed.png)
-
-
-## Running Experiments
-### On Workers
-#### Shinjuku Config
-In our experiments we use the following two setups for worker placement. Each setup requires configuring the Shinjuku using shinjuku.conf file. In ```server_code/shinjuku_rocksdb``` the config files for each machine used in our testbed is provided. On each machine rename the corresponding config and name it as "shinjuku.conf".
+## Worker Configurations
+In ```server_code/shinjuku_rocksdb``` the config files for each machine used in our testbed is provided. On each machine rename the corresponding config and name it as "shinjuku.conf".
 For example, on machine cs-nsl-55:
 ```
 cp shinjuku.conf.nsl-55 shinjuku.conf
 ```
+### Allocated CPU Cores
+The line "***cpu"*** in the shinjuku.conf refers to the ID of cores that will be allocated for Shinjuku. First two work as *"networker"* and *"dispatcher"* and the rest of them will be *"workers"* serving the tasks. 
 
+### NIC Device
+The line ***"devices"*** specifies the PCI device ID for the NIC that will be used for shinjuku. 
+> We used one port of NICs, as 10Gbps is more than the capacity of a single machine (#tasks/s that a machine can handle can not saturate 10G). Also, note that I tried this setup on Ramses to use two different NICs but Shinjuku did not work properly with two NICs in configurations and had an issue (seems like concurrency bug) for sending reply packets.
+
+### Worker IDs
+In our experiments we use the following two setups for worker placement. Each setup requires configuring the Shinjuku using shinjuku.conf file. 
+Depending on the intended setup, the line in shinjuku conf that mentions ***"port"*** should be modified with the assigned IDs to the worker cores. The lines are already in the configuration templates and just need to uncomment the line based on the intended setup.
+These port IDs used for matching with ```hdr.dst_id``` in packets to queue the task in the corresponding queue for the worker and also makes sure that task will run on the  worker core selected by the switch scheduler.
+> Note: dst_id as selected by switches is 0-based (in controller we use 0-n IDs) but in Shinjuku these ids start from 1, our modified code takes this into consideration and port IDs in the shinjuku.conf should be 1-based index.
+
+
+#### Balanced/Uniform Setup
+The figure below shows the uniform (i.e., balanced) placement setup. 
+The python controller in switch codes puts one machine per rack (by logically dividn the register space). Note that the IDs assigned to worker cores are based on a hardcoded parameter in the switch which defines the boundaries for array indexes of each rack. E.g., in our case we used 16 as the boundary, so the IDs for racks start at 1-17-33-49 and etc.
+> In real-world setup, this boundary should be set to max. expected leaves per cluster for spine switches and max. number of workers for each vcluster per rack.
+ 
+ ![Worker Setup Uniform](./figs/placement_uniform.png)
+
+#### Skewed Setup
+The figure below shows the setup and assgined worker IDs  for the Skewed worker placement. The boundaries for arrays are similar to the previous setup. 
+
+![Worker Setup Skewed](./figs/placement_skewed.png)
+
+
+
+## Running Experiments
+### On Workers
+1.  Make sure that shinjuku.conf is correct according to previous part of the instructions. 
+2. Run Shinjku (and RocksDB) using ```./build_and_run.sh```. The script will make a fresh copy of the DB, builds shinjuku and runs it. 
+3. Wait for the outputs that mention worker is ready. 
+
+### On clients
+Run the client based using the following command:
+``` 
+sudo ./build/dpdk_client -l 0,1 -- <args>
+```
+**Arguments:** 
+The first arg ```-l``` is input for DPDK and tells it to use two cores (0,1). One core will process sending loop and another core will handle the receive loop for reply packets.
+The rest of args are handled by our code:
+* ```-l```: (is) **L**atency client?; Type: bool. 
+Inputs:
+ 1: runs RX loop and records the response times. 
+ 0: Just sends the packets (used for multiple clients case)
+* ```-d```: **D**istribution; Type: string;
+Inputs: 
+"db_bimodal": Runs RocksDB requests with 90%GET-10%SCAN.
+"db_port_bimodal": Runs RocksDB requests with 50%GET-50%SCAN. 
+* ```-q```: Req. rate (**Q**PS). Type: int;
+Input: 
+An integer speciying the rate per second. The requests will have an exponential inter-arrival time where mean inter-arrival is calculated based on this parameter.
+* ```-r```: (is) **R**ocksDB; Type: bool;
+Input: 
+1: Means using rocksDB (*We only use this setup*)
+0: Means using synthetic workloads
+
+* ```-n```: Experiment **N**ame; Type: String;
+Input: 
+String attached to the result file name to distinguish the different expeirments. E.g. "rs_h" or "saqr".
+
+#### Running multiple clients
+For rates less than or equal to 200KRPS, we use one machine (cs-nsl-62) and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
+
+> We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediatly to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point the delays were consistant and low (few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* machine. 
+
+For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42. Also, we used spine scheduler ID 100 in our experiment. This ID is assigned to every switch in the network (in spine p4 code we have the same ID). These are  defined as constants in dpdk_client.c. 
+
+To generate the loads we used this setup:
+- For load <= 200K: Use cs-nsl-62 only. 
+- For 200K < load <= 300K: Generate 100K on nsl-42 and the rest on nsl-62.
+ - For load > 300K: Generate 200K on nsl-42 and the rest on nsl-62.
+To do so, run the client on the desired machines. Example:
+
+```
+sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n saqr
+```
 
 
 ## Known Issues
