@@ -221,7 +221,7 @@ For each experiment (each load point), we run the experiment for ~15sec and stop
 > Note: The client program generates requests and sends them (TX loop), and captures the  the reply/result for tasks (RX loop); it compares the current time with the request generation time to calculate the total response time. We also attach the qlen of worker that sent the reply in the packet and store that result in RX loop as well.
 
 The result for each experiment will be saved in the following format in the ```results/``` directory: ```"output"_"experiment-name"_"task-distribution-name"_"rate"```. 
-For example, running saqr experiment at rate for 90%GET-10%SCAN (rdb_bimodal) and at 10000 RPS rate gives: ```output_rs_h_db_port_bimodal_120000```.
+For example, running saqr experiment at rate for 90%GET-10%SCAN (db_bimodal) and at 30000 RPS rate gives: ```output_saqr_db_port_bimodal_30000```.
 
 The main output file contains response time for every task in nanoseconds. In addition, client generates the following outputs:
 * ```<output>.long```: response ns for long tasks only (SCAN)
