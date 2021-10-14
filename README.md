@@ -1,7 +1,12 @@
 
 
 This repository contains the code for programs that run on end-hosts for Saqr in-network scheduling experiments.
-The code is based on [Racksched repo](https://github.com/netx-repo/RackSched) with modifications based on our queue model and network protocols.
+The code is based on [Racksched repo](https://github.com/netx-repo/RackSched) with modifications based on our network protocols and queue model. 
+
+The modified parts are commented with tag *SAQR* in the source code.
+
+- *server_code* folder contains the code that runs on worker machines that serve the tasks.
+- *client_code* folder contains the code that runs on clients, generates the requests, sends them to network and captures the replies from workers.
 
 ------
 # Setting up worker machines
@@ -75,8 +80,7 @@ search cmpt.sfu.ca
 
 > Side note: On cs-nsl-55 when keyboard is connected, the system won't boot until you press F1! That is because of the [Dell's Cover openned alert](https://www.dell.com/support/kbdoc/en-ca/000150875/how-to-reset-or-remove-an-alert-cover-was-previously-removed-message-that-appears-when-starting-a-dell-optiplex-computer)! (not resolved)
 
-## Dependencies and Environment
-### Build Server Code
+## Build
 The setup.sh script installs the required library and components for running the worker code and RocksDB. 
 ```
 cd ./server_code/shinjuku-rocksdb/
@@ -89,30 +93,29 @@ The "after_boot.sh" script should be run after each reboot.  It adds the kernel 
 > Note: might need to modify the NIC name for the machine in the script as instructed (e.g., 0000:01:00.0)
 
 
-
 # Setting up Clients
-> This is only needed for the machine that runs DPDK client.
-
+These steps are only needed for the machine that runs DPDK client.
+## Build
+### Build dependencies
 Setup the DPDK environments variables (or alternatively, add them permanently):
 ```
-export RTE_SDK=/home/<user>/dpdk/dpdk-stable-16.11.1
+export RTE_SDK=/home/<username>/dpdk/dpdk-stable-16.11.1
 export RTE_TARGET=x86_64-native-linuxapp-gcc
 ```
-
+> Note: modify the line that uses NIC PCI address in ```setup.sh``` depending on the interface card that will be used for experiments.
 ```
-cd client_code/client/tools
-./tools.sh install_dpdk
+./client_code/client/tools/tools.sh install_dpdk
 ./setup.sh
 ```
 
-### Build 
+### Build the client code
 ```
 cd ./client_code/client/
 make
 ```
 
 ## Worker Configurations
-In ```server_code/shinjuku_rocksdb``` the config files for each machine used in our testbed is provided. On each machine rename the corresponding config and name it as "shinjuku.conf".
+In ```server_code/shinjuku_rocksdb``` the config files for each machine used in our testbed are provided. On each machine rename the corresponding config and name it as "shinjuku.conf".
 For example, on machine cs-nsl-55:
 ```
 cp shinjuku.conf.nsl-55 shinjuku.conf
@@ -139,63 +142,106 @@ The python controller in switch codes puts one machine per rack (by logically di
  ![Worker Setup Uniform](./figs/placement_uniform.png)
 
 #### Skewed Setup
-The figure below shows the setup and assgined worker IDs  for the Skewed worker placement. The boundaries for arrays are similar to the previous setup. 
+The figure below shows the setup and assgined worker IDs  for the Skewed worker placement. The boundaries for arrays are similar to the previous setup. That's why the worker IDs for second rack starts at 17.
 
 ![Worker Setup Skewed](./figs/placement_skewed.png)
 
 
-
 ## Running Experiments
-### On Workers
+### Run the switch program
+The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/parhamyassini/saqr-p4). 
+
+### Run the Workers
 1.  Make sure that shinjuku.conf is correct according to previous part of the instructions. 
 2. Run Shinjku (and RocksDB) using ```./build_and_run.sh```. The script will make a fresh copy of the DB, builds shinjuku and runs it. 
-3. Wait for the outputs that mention worker is ready. 
+3. Wait for the outputs log that mentions worker is ready ("do_work: Waiting for dispatcher work"). 
 
-### On clients
-Run the client based using the following command:
+
+### Run the client(s)
+Run the client using the following command:
 ``` 
 sudo ./build/dpdk_client -l 0,1 -- <args>
 ```
-**Arguments:** 
+The first arg after *-l* is an input for DPDK indicating that we use two cores (one for RX and one for TX loop). The rest of args (after ``--`` are inputs to dpdk_client.c) and will configure the behaviour of the client.
+
+**args:** 
 The first arg ```-l``` is input for DPDK and tells it to use two cores (0,1). One core will process sending loop and another core will handle the receive loop for reply packets.
 The rest of args are handled by our code:
+
 * ```-l```: (is) **L**atency client?; Type: bool. 
-Inputs:
- 1: runs RX loop and records the response times. 
- 0: Just sends the packets (used for multiple clients case)
+
+	 1: runs RX loop and records the response times. 
+	 
+	 0: Just sends the packets (used for multiple clients case)
+	 
 * ```-d```: **D**istribution; Type: string;
-Inputs: 
-"db_bimodal": Runs RocksDB requests with 90%GET-10%SCAN.
-"db_port_bimodal": Runs RocksDB requests with 50%GET-50%SCAN. 
+
+	"db_bimodal": Runs RocksDB requests with 90%GET-10%SCAN.
+	
+	"db_port_bimodal": Runs RocksDB requests with 50%GET-50%SCAN. 
 * ```-q```: Req. rate (**Q**PS). Type: int;
-Input: 
-An integer speciying the rate per second. The requests will have an exponential inter-arrival time where mean inter-arrival is calculated based on this parameter.
+
+	An integer speciying the rate per second. The requests will have an exponential inter-arrival time where mean inter-arrival is calculated based on this parameter.
+	
 * ```-r```: (is) **R**ocksDB; Type: bool;
-Input: 
-1: Means using rocksDB (*We only use this setup*)
-0: Means using synthetic workloads
+
+	1: Means using rocksDB (*We only use this setup*)
+	
+	0: Means using synthetic workloads
 
 * ```-n```: Experiment **N**ame; Type: String;
-Input: 
-String attached to the result file name to distinguish the different expeirments. E.g. "rs_h" or "saqr".
+
+	String attached to the result file name to distinguish the different 	expeirments. E.g. "rs_h" or "saqr".
+
+Example:
+```
+sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n saqr
+```
 
 #### Running multiple clients
-For rates less than or equal to 200KRPS, we use one machine (cs-nsl-62) and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
+For rates up to 200KRPS, we use one machine (cs-nsl-62) and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
 
 > We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediatly to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point the delays were consistant and low (few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* machine. 
 
-For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42. Also, we used spine scheduler ID 100 in our experiment. This ID is assigned to every switch in the network (in spine p4 code we have the same ID). These are  defined as constants in dpdk_client.c. 
+For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID 100``` in dpdk_client.c) . 
+
+Also, we used spine scheduler ID 100 in our experiment (```#define SPINE_SCHEDULER_ID 100``` in dpdk_client.c). This ID is assigned to every switch in the network (in spine P4 code we have the same ID).  
 
 To generate the loads we used this setup:
 - For load <= 200K: Use cs-nsl-62 only. 
 - For 200K < load <= 300K: Generate 100K on nsl-42 and the rest on nsl-62.
  - For load > 300K: Generate 200K on nsl-42 and the rest on nsl-62.
-To do so, run the client on the desired machines. Example:
 
-```
-sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n saqr
-```
+To do so, run the client codes on the desired machines. 
 
+
+### Collecting the latency results
+For each experiment (each load point), we run the experiment for ~15sec and stop the client using ```ctrl + c```. When client code is terminated, it will save the latency result outputs and the prints the total task pkts sent and reply pkts received.
+
+> Note: The client program generates requests and sends them (TX loop), and captures the  the reply/result for tasks (RX loop); it compares the current time with the request generation time to calculate the total response time. We also attach the qlen of worker that sent the reply in the packet and store that result in RX loop as well.
+
+The result for each experiment will be saved in the following format in the ```results/``` directory: ```"output"_"experiment-name"_"task-distribution-name"_"rate"```. 
+For example, running saqr experiment at rate for 90%GET-10%SCAN (rdb_bimodal) and at 10000 RPS rate gives: ```output_rs_h_db_port_bimodal_120000```.
+
+The main output file contains response time for every task in nanoseconds. In addition, client generates the following outputs:
+* ```<output>.long```: response ns for long tasks only (SCAN)
+* ```<output>.short```: response ns for short tasks only (GET)
+* ```<output>.ratios```: ratio of response time / service time
+* ```<output>.queue_lengths```: queue len of worker that executed the tasks.
+
+### Collecting the overhead results
+The results for the msg rate and processing overheads could be collected directly from the switch controller python script which reads the register values (internal state of switch). 
+
+The details can be found in [this repo](https://github.com/parhamyassini/saqr-p4). 
+
+> Note that we need to record the number of tasks and task rate for each experiment form client outputs in addition to the switch controller outputs. We use the total number of tasks (output of client) and the task rate (e.g., 30KRPS) to calculate the exact experiment duration. Then, we will use the total number of msgs to calculate the *rate* (#msgs/duration(s)).
+
+### Analyze/plot the results
+* The python script ```parselats.py``` is useful for quickly getting the 99th percentile mean and median for response times. It gets one argument which is the file to be anlayzed. Example:
+```python parselats.py ./results/output_saqr_db_port_bimodal_90000```
+
+* The python script ```plot_results.py``` is the one used for plotting the results in the paper.
+XXX Add some details input params.
 
 ## Known Issues
 ### Dune hardware compatibility issue
