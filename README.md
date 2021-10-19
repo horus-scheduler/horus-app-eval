@@ -114,7 +114,7 @@ cd ./client_code/client/
 make
 ```
 
-## Worker Configurations
+# Worker Configurations
 In ```server_code/shinjuku_rocksdb``` the config files for each machine used in our testbed are provided. On each machine rename the corresponding config and name it as "shinjuku.conf".
 For example, on machine cs-nsl-55:
 ```
@@ -147,7 +147,7 @@ The figure below shows the setup and assgined worker IDs  for the Skewed worker 
 ![Worker Setup Skewed](./figs/placement_skewed.png)
 
 
-## Running Experiments
+# Running Experiments
 ### Run the switch program
 The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/parhamyassini/saqr-p4). 
 
