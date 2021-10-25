@@ -203,7 +203,7 @@ For rates up to 200KRPS, we use one machine (cs-nsl-62) and for higher rates we 
 
 > We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediatly to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point the delays were consistant and low (few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* machine. 
 
-For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID 100``` in dpdk_client.c) . 
+For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID 110``` in dpdk_client.c). ** Note: ** Make sure to use the corresponding client ID and change it (if necessary) in the dpdk_client.c on client machine.  
 
 Also, we used spine scheduler ID 100 in our experiment (```#define SPINE_SCHEDULER_ID 100``` in dpdk_client.c). This ID is assigned to every switch in the network (in spine P4 code we have the same ID).  
 
