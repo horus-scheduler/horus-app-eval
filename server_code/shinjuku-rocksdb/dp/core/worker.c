@@ -131,7 +131,7 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 	int counter = 0;
     /*
      * @parham: different tasks at worker based on runNs (set by client). 
-     * Client sends runNs 500 for GET and 0 for SCAN functions.
+     * Client sends runNs > 0 for GET and 0 for SCAN functions.
     */
 	if (req->runNs > 0) {
         //log_info("\nRUNS 0\n");
