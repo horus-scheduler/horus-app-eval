@@ -11,13 +11,14 @@ include $(RTE_SDK)/mk/rte.vars.mk
 APP = dpdk_client
 
 # all source are stored in SRCS-y
-SRCS-y := dpdk_client.c
+SRCS-y := dpdk_client.c \
+	  set.c
 
 CFLAGS += -O3 # -g for gdb debugging
 #CFLAGS += $(WERROR_FLAGS)
 
 # GSL
-CFLAGS += -I/usr/local/include
+CFLAGS += -I /usr/local/include
 LDFLAGS += -L/usr/local/lib
 LDLIBS += -lgsl -lgslcblas -lm
 

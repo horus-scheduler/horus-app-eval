@@ -85,6 +85,14 @@ typedef struct LatencyResults_ {
   size_t count_long;
 } LatencyResults;
 
+typedef struct SearchResults_ {
+  uint64_t *doc_cnt;
+  uint64_t *doc_id1;
+  uint64_t *doc_id2;
+  uint64_t *doc_id3;
+  uint64_t *doc_id4;
+} SearchResults;
+
 /********* Distributions *********/
 
 // Exponential Distribution
@@ -228,6 +236,7 @@ typedef struct Message_ {
   uint32_t pkts_length;
   uint64_t run_ns;
   uint64_t gen_ns;
+  uint64_t app_data[16]; // Stores document IDs for search (intersection) app
 } __attribute__((__packed__)) Message;
 
 struct mbuf_table {

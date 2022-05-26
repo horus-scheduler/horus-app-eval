@@ -9,6 +9,7 @@
 #include <string.h>
 #include <sys/queue.h>
 #include <time.h>
+#include <endian.h>
 
 #include <rte_cycles.h>
 #include <rte_debug.h>
@@ -26,7 +27,7 @@
 #include <rte_udp.h>
 
 #include "util.h"
-
+#include "set.h"
 
 /*
  * SAQR: Defines the ID of spine scheduler (each scheduler has a unique static ID),
@@ -40,6 +41,14 @@
 #define NUM_PKTS 1
 #define MAX_RESULT_SIZE 16777216UL  // 2^24
 
+#define APP_BENCHMARK 0
+#define APP_KEYVAL 1
+#define APP_SEARCH 2
+
+#define SEARCH_MIN_WORD 1
+#define SEARCH_MAX_WORD 16
+#define SEARCH_MIN_KEY 1
+#define SEARCH_MAX_KEY 200
 /*
  * custom types
  */
@@ -70,13 +79,15 @@ uint32_t is_rocksdb = 0; // 1 means testing with rocksdb, 0 means testing with s
 char *run_name;
 /********* Packet related *********/
 uint32_t req_id = 0;
-int max_req_id = 1000;
+int max_req_id = 65536;
 uint32_t req_id_core[8] = {0};
 
 /********* Results *********/
 uint64_t pkt_sent = 0;
 uint64_t pkt_recv = 0;
 LatencyResults latency_results = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0};
+
+SearchResults search_results = {NULL, NULL, NULL, NULL, NULL};
 
 /********* Debug the us *********/
 uint64_t work_ns_sample[1048576] = {0};
@@ -121,12 +132,26 @@ static void dump_stats_to_file() {
   sprintf(output_name, "%s.queue_lengths", output_name_base);
   FILE *queue_length_ptr = fopen(output_name, "wb");
 
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.search_doc_cnt", output_name_base);
+  FILE *search_res_ptr = fopen(output_name, "wb");
+
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.search_doc_id", output_name_base);
+  FILE *search_id_ptr = fopen(output_name, "wb");
+
   for (int i = 0; i < latency_results.count; i++) {
     fprintf(queue_length_ptr, "%u\n",latency_results.queue_lengths[i][0]);
     fprintf(output_ptr, "%lu\n", latency_results.sjrn_times[i]);
     fprintf(output_reply_ns_ptr, "%lu\n", latency_results.reply_run_ns[i]);
     fprintf(ratio_ptr, "%lu\n", latency_results.work_ratios[i]);
-    
+    // Search results
+    fprintf(search_res_ptr, "%lu\n", search_results.doc_cnt[i]);
+    fprintf(search_id_ptr, "%lu\n", search_results.doc_id1[i]);
+    fprintf(search_id_ptr, "%lu\n", search_results.doc_id2[i]);
+    fprintf(search_id_ptr, "%lu\n", search_results.doc_id3[i]);
+    fprintf(search_id_ptr, "%lu\n", search_results.doc_id4[i]);
+
     if (latency_results.count_short > i){
       fprintf(output_ptr_short, "%lu\n", latency_results.sjrn_times_short[i]);
       fprintf(ratio_ptr_short, "%lu\n", latency_results.work_ratios_short[i]);
@@ -138,6 +163,8 @@ static void dump_stats_to_file() {
     }
   }
 
+  fclose(search_res_ptr);
+  fclose(search_id_ptr);
   fclose(queue_length_ptr);
   fclose(output_ptr_short);
   fclose(output_ptr_long);
@@ -180,7 +207,9 @@ static void sigint_handler(int sig) {
 */
 static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
                             uint16_t seq_num, uint32_t pkts_length,
-                            uint64_t gen_ns, uint64_t run_ns, int port_offset) {
+                            uint64_t gen_ns, uint64_t run_ns, int port_offset,
+                            int app_type,
+                            uint64_t app_data[]) {
   struct lcore_configuration *lconf = &lcore_conf[lcore_id];
   assert(mbuf != NULL);
 
@@ -234,15 +263,22 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   req->dst_id = SPINE_SCHEDULER_ID << 8;
   
   req->qlen = 0;
-  req->seq_num = seq_num;
+  
   
   // SAQR: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
   req->client_id = (CLIENT_ID<<8);
   
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];
+  req->seq_num = SWAP_UINT16((uint16_t)(req->req_id));
   req->pkts_length = pkts_length;
   req->gen_ns = gen_ns; // INFO: Req generation time (for calculations)
   req->run_ns = run_ns; // INFO: Defines the type of task (used in worker to identify the work to be done)
+  if (app_type == APP_SEARCH) {
+    int i=0;
+    for (i=0; i < gen_ns; i++) {
+      req->app_data[i] = app_data[i];
+    }
+  }
   // printf("request client_id: %u, req_id: %u\n",req->client_id,req->req_id);
   mbuf->data_len += sizeof(Message);
   mbuf->pkt_len += sizeof(Message);
@@ -292,7 +328,7 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   latency_results.queue_lengths[latency_results.count][0] =
       (res->qlen) >> 8;
   latency_results.count++;
-  if (reply_run_ns == 0) {
+  if (reply_run_ns >= 100000000) {  //@muh: changes for long and short out file differ
       // long request
       latency_results.sjrn_times_long[latency_results.count_long] = sjrn;
       latency_results.work_ratios_long[latency_results.count_long] = sjrn / res->run_ns;
@@ -333,7 +369,7 @@ static void fixed_tx_loop(uint32_t lcore_id, double work_ns) {
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_BENCHMARK, NULL);
       enqueue_pkt(lcore_id, mbuf);
     }
     req_id++;
@@ -349,7 +385,7 @@ static void fixed_tx_loop(uint32_t lcore_id, double work_ns) {
   free_exp_dist(dist);
 }
 
-static void exp_tx_loop(uint32_t lcore_id, double work_mu) {
+static void exp_tx_loop(uint32_t lcore_id, double work_mu, int app_type) {
   struct lcore_configuration *lconf = &lcore_conf[lcore_id];
   printf("%lld entering exp TX loop on lcore %u\n", (long long)time(NULL),
          lcore_id);
@@ -361,6 +397,7 @@ static void exp_tx_loop(uint32_t lcore_id, double work_mu) {
   double lambda = qps * 1e-9;
   double mu = 1.0 / lambda;
   uint64_t work_ns;
+  uint64_t search_word_cnt;
   init_exp_dist(dist, mu);
   init_exp_dist(work_dist, work_mu);
 
@@ -372,14 +409,37 @@ static void exp_tx_loop(uint32_t lcore_id, double work_mu) {
     // while (work_ns == 0) {
     //     work_ns = exp_dist_work_ns(work_dist);
     // }
-    work_ns = exp_dist_work_ns(work_dist);
+    SimpleSet set;
+    set_init(&set);
+    uint64_t app_data[16]; 
+    if (app_type == APP_SEARCH){
+      search_word_cnt = rand() % (SEARCH_MAX_WORD + 1 - SEARCH_MIN_WORD) + SEARCH_MIN_WORD;
+      int i=0;
+      while (set_length(&set)!= search_word_cnt) {
+        uint64_t word_id;
+        word_id = rand() % (SEARCH_MAX_KEY + 1 - SEARCH_MIN_KEY) + SEARCH_MIN_KEY;
+        if (set_add(&set, word_id) == SET_TRUE) { // Added to set (new key)
+          app_data[i++] = htobe64(word_id);
+        }
+      }
+      work_ns = htobe64(search_word_cnt);
+
+    } else {
+      work_ns = exp_dist_work_ns(work_dist);
+    }
     uint64_t gen_ns = exp_dist_next_arrival_ns(dist);
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+      if (app_type == APP_SEARCH) {
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, app_type, app_data);
+      } else {
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, app_type, NULL);
+      }
+      
       enqueue_pkt(lcore_id, mbuf);
     }
+    set_destroy(&set);
     req_id++;
     if (req_id_core[lcore_id] >= max_req_id) {
       req_id_core[lcore_id] = 0;
@@ -390,6 +450,8 @@ static void exp_tx_loop(uint32_t lcore_id, double work_mu) {
       ;
     send_pkt_burst(lcore_id);
   }
+
+  
   free_exp_dist(dist);
   free_exp_dist(work_dist);
 }
@@ -419,7 +481,7 @@ static void lognormal_tx_loop(uint32_t lcore_id, double work_mu, double sigma) {
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
       enqueue_pkt(lcore_id, mbuf);
     }
     req_id++;
@@ -446,8 +508,8 @@ static void bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
 
   ExpDist *dist = malloc(sizeof(ExpDist));
   BimodalDist *work_dist = malloc(sizeof(BimodalDist));
-  double lambda = qps * 1e-9;
-  double mu = 1.0 / lambda;
+  double lambda = qps * 1e-9;     // Number of Queries per nSec
+  double mu = 1.0 / lambda;   // Time in nSec for 1 Query
   uint64_t work_ns;
   init_exp_dist(dist, mu);
   init_bimodal_dist(work_dist, work_1_ns, work_2_ns, ratio);
@@ -457,12 +519,12 @@ static void bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
 
   signal(SIGINT, sigint_handler);
   while (1) {
-    work_ns = bimodal_dist_work_ns(work_dist);
-    uint64_t gen_ns = exp_dist_next_arrival_ns(dist);
+    work_ns = bimodal_dist_work_ns(work_dist);    //Ret: either work_1_ns or work_2_ns (in a normal dist. manner)
+    uint64_t gen_ns = exp_dist_next_arrival_ns(dist); //Ret: get_cur_ns() + gsl_ran_exponential(dist-> r, dist->mu)   [Cur time in nSec + rand Exp. dist. around mean(time in nSec for 1 query) ] 
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
       enqueue_pkt(lcore_id, mbuf);
     }
     req_id++;
@@ -471,6 +533,7 @@ static void bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     } else {
       req_id_core[lcore_id]++;
     }
+    // @muh wait until get_cur_ns() >= gen_ns   @: Why wait for req generation time ? Ans: For assert cond when processing worker response at process_packet(). ie: resp. arrived after query generated time
     while (get_cur_ns() < gen_ns)
       ;
     send_pkt_burst(lcore_id);
@@ -506,9 +569,9 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
       if (work_ns == work_1_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
       } else if (work_ns == work_2_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
       }
       enqueue_pkt(lcore_id, mbuf);
     }
@@ -555,11 +618,11 @@ static void port_trimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
       if (work_ns == work_1_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_BENCHMARK, NULL);
       } else if (work_ns == work_2_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 1);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 1, APP_BENCHMARK, NULL);
       } else if (work_ns == work_3_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 2);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 2, APP_BENCHMARK, NULL);
       }
       enqueue_pkt(lcore_id, mbuf);
     }
@@ -581,7 +644,7 @@ static void tx_loop(uint32_t lcore_id) {
   if (strcmp(dist_type, "fixed") == 0) {
     fixed_tx_loop(lcore_id, 1000 * scale_factor);  // 1us
   } else if (strcmp(dist_type, "exp") == 0) {
-    exp_tx_loop(lcore_id, 1000 * scale_factor);  // mu = 1us
+    exp_tx_loop(lcore_id, 1000 * scale_factor, APP_SEARCH);  // mu = 1us
   } else if (strcmp(dist_type, "lognormal") == 0) {
     lognormal_tx_loop(lcore_id, 1000 * scale_factor,
                       10000);  // mu = 1us, sigma = 10us
@@ -599,6 +662,15 @@ static void tx_loop(uint32_t lcore_id) {
     // run_ns=0, SCAN;
     // 90%: GET, 10%: SCAN
     bimodal_tx_loop(lcore_id, 500 * scale_factor, 0 * scale_factor, 0.9);
+  } else if (strcmp(dist_type, "sim") == 0){  //@muh: added for short and long duration queries
+
+    // run_ns=0, SCAN;
+    // 90%: short duration, 10%: long duration, for 50 us and 500 ms
+    //bimodal_tx_loop(lcore_id, 50000* scale_factor, 500000000 * scale_factor, 0.9);
+    // 50%: short duration, 50%: long duration, for 50 us and 500 ms
+    bimodal_tx_loop(lcore_id, 50000* scale_factor, 500000000 * scale_factor, 0.5);
+
+
   } else if (strcmp(dist_type, "db_port_bimodal") == 0) {
     port_bimodal_tx_loop(lcore_id, 1000 * scale_factor, 0 * scale_factor, 0.5);
   } else {
@@ -669,7 +741,12 @@ static void custom_init(void) {
     latency_results.reply_run_ns =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
   }
-
+  // init huge arrays for responses (#documents and doc IDs) in search application
+  search_results.doc_cnt = (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
+  search_results.doc_id1 = (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
+  search_results.doc_id2 = (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
+  search_results.doc_id3 = (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
+  search_results.doc_id4 = (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
   printf("\n=============== Finish initialization ===============\n\n");
 }
 
