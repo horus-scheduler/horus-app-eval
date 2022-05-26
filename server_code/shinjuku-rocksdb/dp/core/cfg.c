@@ -63,6 +63,7 @@ static int parse_port(void);
 static int parse_slo(void);
 static int parse_queue_settings(void);
 static int parse_preemption_delay(void);
+static int parse_keep_alive_interval(void);
 static int parse_gateway_addr(void);
 static int parse_arp(void);
 static int parse_devices(void);
@@ -80,6 +81,7 @@ static struct config_vector_t config_tbl[] = {
 	{ "slo",          parse_slo},
 	{ "queue_settings", parse_queue_settings},
 	{ "preemption_delay", parse_preemption_delay},
+	{ "keep_alive_interval", parse_keep_alive_interval},
 	{ "gateway_addr", parse_gateway_addr},
 	{ "arp",          parse_arp},
 	{ "devices",      parse_devices},
@@ -180,6 +182,18 @@ static int parse_preemption_delay(void)
 
 	delay = config_setting_get_int64(preemption);
 	CFG.preemption_delay = (uint64_t) delay;
+	return 0;
+}
+
+static int parse_keep_alive_interval(void)
+{
+	const config_setting_t *interval_conf = NULL;
+	int64_t interval;
+	interval_conf = config_lookup(&cfg, "keep_alive_interval");
+	if (!interval_conf)
+		return -EINVAL;
+	interval = config_setting_get_int64(interval_conf);
+	CFG.keep_alive_interval_us = (uint64_t) interval;
 	return 0;
 }
 
@@ -348,6 +362,7 @@ static int add_cpu(int cpu)
 	if (CFG.num_cpus >= CFG_MAX_CPU)
 		return -E2BIG;
 	CFG.cpu[CFG.num_cpus++] = (uint32_t)cpu;
+	CFG.cluster_id[CFG.num_cpus] = 0; // TODO: fix this get variable cluster ID from controller for workers
 	return 0;
 }
 

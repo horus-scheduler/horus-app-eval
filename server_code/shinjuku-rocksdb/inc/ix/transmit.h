@@ -64,6 +64,7 @@ static inline void ip_setup_header(struct ip_hdr *iphdr, uint8_t proto,
 
 DECLARE_PERCPU(struct mempool, response_pool);
 struct mempool_datastore response_datastore;
+struct mempool_datastore ka_response_datastore;
 
 /**
  * udp_mbuf_done frees mbuf after the transmission of a UDP packet
@@ -106,6 +107,7 @@ static inline int udp_send_one(void * data, size_t len, struct ip_tuple * id)
 
 	dst_addr.addr = id->dst_ip;
 	if (arp_lookup_mac(&dst_addr, &ethhdr->dhost)) {
+                
 		ret = -RET_AGAIN;
 		goto out;
         }
@@ -132,6 +134,7 @@ static inline int udp_send_one(void * data, size_t len, struct ip_tuple * id)
 		panic("udp_send not implemented for bonded interfaces\n");
 	else
 		ret = eth_send(percpu_get(eth_txqs)[0], pkt);
+
 
 	if (ret)
         	goto out;

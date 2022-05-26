@@ -23,6 +23,8 @@
 #include <limits.h>
 #include <stdint.h>
 #include <ucontext.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <ix/cfg.h>
 #include <ix/mempool.h>
@@ -58,9 +60,18 @@
 #define PKT_TYPE_PROBE_IDLE_QUEUE 8
 #define PKT_TYPE_PROBE_IDLE_RESPONSE 9
 #define PKT_TYPE_IDLE_REMOVE 10
+#define PKT_TYPE_KEEP_ALIVE 11
+#define PKT_TYPE_WORKER_ID 12
+#define PKT_TYPE_WORKER_ID_ACK 13
 
 #define WORKER_STATE_IDLE 1
 #define WORKER_STATE_BUSY 0
+
+#define ROCKSDB_CLIENT 110
+#define SEARCH_CLIENT 200
+
+#define CONTROLLER_PORT 1234
+
 #define SWAP_UINT16(x) (((x) >> 8) | ((x) << 8))
 
 struct mempool_datastore task_datastore;
@@ -97,6 +108,7 @@ struct message {
     uint32_t pkts_length;
     uint64_t runNs;
     uint64_t genNs;
+    uint64_t app_data[16];
 } __attribute__((__packed__));
 
 struct request
@@ -303,7 +315,6 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
          * We use the same idea for isolating task queues of different workers
          * dequeue from the worker queue (type param here indicates the queue number)
         */
-        
         if(tskq_dequeue(&tq[core_id], rnbl_ptr, req, type, category,
                         timestamp) == 0)
                 return 0;
@@ -348,7 +359,7 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
  * @parham: Parses the packet headers: eth, ip, udp.
  * modified to work with Saqr headers and support core-granular scheduling (schedulers select a worker for task not server)
 */
-static inline struct request * rq_update(struct request_queue * rq, struct mbuf * pkt, uint8_t *core_id)
+static inline struct request * rq_update(struct request_queue * rq, struct mbuf * pkt, uint8_t *core_id, bool *place_to_queue)
 {
     // Quickly parse packet without doing checks
     struct eth_hdr * ethhdr = mbuf_mtod(pkt, struct eth_hdr *);
@@ -360,6 +371,10 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
     void * data = mbuf_nextd(udphdr, void *);
     struct message * msg = (struct message *) data;
     
+    *core_id = -1;
+    *place_to_queue = 1;
+
+    uint8_t pkt_type = msg->pkt_type;
     /* 
      * SAQR: Line below contains decision type tag (0|1) which indicates that leaf selected this worker based on 
       Idle selection (1) or not (0).
@@ -374,7 +389,21 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
         pkts_length = 1; // Minimum 1 packet per task
     // SAQR: To make it consistent with shinjuku conf, worker IDs start from 1 (in switch we use 0 based index)
     uint16_t dst_id = SWAP_UINT16(msg->dst_id) + 1; 
+
     //log_info("\npkt_type: %u, cluster_id: %u, src_id: %u, dst_id: %u, seq_num: %u, client_id: %u, req_id: %u, pkts_length: %u, queue_len: %u\n", type, cluster_id, msg->src_id, dst_id, seq_num, client_id, req_id, pkts_length, msg->qlen);
+    
+    
+    if (pkt_type == PKT_TYPE_WORKER_ID) {
+            log_info("\n Setting new worker IDs for cores. pkt_type: %u \n", pkt_type);
+            for (int i=0; i < CFG.num_ports; i++) {
+                    CFG.ports[i] = msg->app_data[i];
+            }
+            // Reply pkt should be handled by the networker
+            *core_id = CFG.cpu[CFG_CPU_NETWORKER_INDEX]; 
+            // return NULL so that networker does not place it in the worker queues
+            *place_to_queue = 0;
+            return NULL; 
+    }
     
     /* 
      * SAQR: Here we find out the physical core based on the shinjuku configuration and info in pkt:
@@ -382,11 +411,13 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
      * In shinjuku.conf We use the *port=[]* to indicate worker IDs each of which maps to one of the CPUs 
      * Here we check and match the dst_id with the worker ID and use that index to set core_id. 
     */
-    *core_id = 0;
     for (int i = 0; i < CFG.num_ports; i++) {
         if (dst_id == CFG.ports[i]) {
             *core_id = i;
         } 
+    }
+    if (core_id == -1) { // Could not find a match for worker ID (core ID) and dst_id, assign to random worker
+        *core_id = (uint8_t)((rand() % (CFG.num_ports)) + 1);
     }
     
     if (pkts_length == 1) {

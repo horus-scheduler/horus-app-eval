@@ -35,6 +35,8 @@
 #define CFG_MAX_CPU     128
 #define CFG_MAX_ETHDEV   16
 
+#define CFG_CPU_DISPATCHER_INDEX 0
+#define CFG_CPU_NETWORKER_INDEX 1
 
 struct cfg_ip_addr {
 	uint32_t addr;
@@ -50,10 +52,10 @@ struct cfg_parameters {
 
 	int num_cpus;
 	unsigned int cpu[CFG_MAX_CPU];
-
+	unsigned int cluster_id[CFG_MAX_CPU];
 	int num_ethdev;
 	struct pci_addr ethdev[CFG_MAX_ETHDEV];
-
+	uint64_t keep_alive_interval_us;
 	int num_ports;
 	uint16_t ports[CFG_MAX_PORTS];
 

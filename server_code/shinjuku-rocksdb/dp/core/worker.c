@@ -48,6 +48,7 @@
 #include <ix/context.h>
 #include <ix/dispatch.h>
 #include <ix/transmit.h>
+#include <ix/intersection.h>
 
 #include <c.h>
 #include <dune.h>
@@ -101,10 +102,71 @@ int response_init_cpu(void)
 
 static void test_handler(struct dune_tf *tf)
 {
-        asm volatile ("cli":::);
-        dune_apic_eoi();
-        swapcontext_fast_to_control(cont, &uctx_main);
+    asm volatile ("cli":::);
+    dune_apic_eoi();
+    swapcontext_fast_to_control(cont, &uctx_main);   
 }
+
+static void rocksdb_work(struct message * req) {
+    rocksdb_readoptions_t * readoptions = rocksdb_readoptions_create();
+    rocksdb_iterator_t * iter = rocksdb_create_iterator(db, readoptions);
+    int counter = 0;
+
+    /*
+    * @parham: different tasks at worker based on runNs (set by client). 
+    * Client sends runNs 500 for GET and 0 for SCAN functions.
+    */
+    if (req->runNs > 0) {
+        //log_info("\nRUNS 0\n");
+        size_t long_size;
+        char long_key[8];
+                snprintf(long_key, 8, "long_key");
+        for (int i = 0; i < 60; i++) {
+            char * long_val = rocksdb_get(db, readoptions, long_key, 8,
+                                                      &long_size, NULL);
+            //log_info("got string from DB %s \n", long_val);
+            //log_info("str size %d \n", strlen(long_val));
+            free(long_val);
+        }
+    } else {
+        //log_info("\nRUNS 1\n");
+        for (rocksdb_iter_seek_to_first(iter); rocksdb_iter_valid(iter); rocksdb_iter_next(iter)) {
+            char * retr_key;
+            size_t klen;
+            retr_key = rocksdb_iter_key(iter, &klen);
+            if (req->runNs > 0 && ++counter > 5000)
+                break;
+        }
+    }
+    rocksdb_iter_destroy(iter);
+    rocksdb_readoptions_destroy(readoptions);
+}
+
+uint64_t * search_work(struct message * req) {
+    uint64_t query_word_ids[MAX_QUERY_WORDS];
+    uint64_t *intersection_res, *intermediate_res;
+    uint64_t intersection_tmp[2][1 + MAX_INSERSECTION_DOCS];
+    uint64_t query_word_cnt = req->runNs;
+    
+    for (unsigned i = 0; i < query_word_cnt; i++) {
+        query_word_ids[i] = req->app_data[i];
+    }
+    uint32_t word_id_ofst = query_word_ids[0]-1;
+    intersection_res = word_to_docids[word_id_ofst];
+
+    for (unsigned intersection_opr_cnt = 1; intersection_opr_cnt < query_word_cnt; intersection_opr_cnt++) {
+      word_id_ofst = query_word_ids[intersection_opr_cnt]-1;
+      intermediate_res = intersection_tmp[intersection_opr_cnt % 2];
+
+      compute_intersection(intersection_res, word_to_docids[word_id_ofst], intermediate_res);
+      intersection_res = intermediate_res;
+
+      if (intersection_res[0] == 0) // stop if the intersection is empty
+        break;
+    }
+    return intersection_res;
+}
+
 
 /**
  * generic_work - generic function acting as placeholder for application-level
@@ -122,41 +184,18 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     int ret;
 
     struct message * req = (struct message *) data;
+    uint64_t *intersection_res;
     // log_info("Generic work being executed on %d\n", cpu_nr_);
     // log_info("queue_length %d: %d\n", cpu_nr_, queue_length[cpu_nr_]);
     // log_info("worker_state %d: %d\n", cpu_nr_, worker_state[cpu_nr_]);
-	rocksdb_readoptions_t * readoptions = rocksdb_readoptions_create();
-	rocksdb_iterator_t * iter = rocksdb_create_iterator(db, readoptions);
+    
+    if (req->client_id == ROCKSDB_CLIENT) {
+        rocksdb_work(req);
+    } else if (req->client_id == SEARCH_CLIENT) {
+        intersection_res = search_work(req);
+    }
+    
 
-	int counter = 0;
-    /*
-     * @parham: different tasks at worker based on runNs (set by client). 
-     * Client sends runNs > 0 for GET and 0 for SCAN functions.
-    */
-	if (req->runNs > 0) {
-        //log_info("\nRUNS 0\n");
-		size_t long_size;
-		char long_key[8];
-                snprintf(long_key, 8, "long_key");
-		for (int i = 0; i < 60; i++) {
-			char * long_val = rocksdb_get(db, readoptions, long_key, 8,
-                                                      &long_size, NULL);
-            //log_info("got string from DB %s \n", long_val);
-            //log_info("str size %d \n", strlen(long_val));
-			free(long_val);
-		}
-	} else {
-        //log_info("\nRUNS 1\n");
-    	for (rocksdb_iter_seek_to_first(iter); rocksdb_iter_valid(iter); rocksdb_iter_next(iter)) {
-    		char * retr_key;
-    		size_t klen;
-    		retr_key = rocksdb_iter_key(iter, &klen);
-    		if (req->runNs > 0 && ++counter > 5000)
-    			break;
-    	}
-	}
-	rocksdb_iter_destroy(iter);
-	rocksdb_readoptions_destroy(readoptions);
 	/* 
      * For synthetic workloads (generate different service times) use below:
         uint64_t i = 0;
@@ -169,9 +208,18 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     
     asm volatile ("cli":::);
     struct message resp;
+    if (req->client_id == SEARCH_CLIENT) { // Write additional search result data to pkt
+        uint64_t intersection_size = intersection_res[0];
+        resp.runNs = intersection_size;
+        for (unsigned i = 0; i < intersection_size; i++) {
+            resp.app_data[i] = intersection_res[1+i];
+        }
+        
+    } else {
+        resp.runNs = req->runNs;    
+    }
 	resp.genNs = req->genNs;
-	resp.runNs = req->runNs;
-
+	
     resp.cluster_id = req->cluster_id;
 	resp.client_id = req->client_id;
 	resp.req_id = req->req_id;
@@ -248,6 +296,11 @@ static inline void init_worker(void)
         cpu_nr_ = percpu_get(cpu_nr) - 2;
         worker_responses[cpu_nr_].flag = PROCESSED;
         worker_state[cpu_nr_] = 0; // SAQR: Initial state of all workers are 0 (in idle list of leaf)
+        if (cpu_nr_ == 0) {
+            // Initialize search app requirements
+            load_docs();
+            log_info("Search App init: Loaded %d words.\n", word_cnt);
+        }
         dune_register_intr_handler(PREEMPT_VECTOR, test_handler);
         eth_process_reclaim();
         asm volatile ("cli":::);
