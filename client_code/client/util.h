@@ -239,6 +239,15 @@ typedef struct Message_ {
   uint64_t app_data[16]; // Stores document IDs for search (intersection) app
 } __attribute__((__packed__)) Message;
 
+/*
+ * SAQR: struct to hold the retranmission data (original packet + send meta data)
+*/
+typedef struct rtm_object_ { 
+  uint64_t last_sent_tstamp;
+  unsigned int tx_count;
+  Message sent_msg;
+} rtm_object;
+
 struct mbuf_table {
   uint32_t len;
   struct rte_mbuf *m_table[MAX_BURST_SIZE];
@@ -549,6 +558,24 @@ static void init(void) {
   }
   check_link_status();
   init_header_template();
+}
+
+
+void num_teardown(void *n) {
+    rtm_object *input_rtm = (rtm_object *)n;
+    input_rtm->last_sent_tstamp = 0; // just so we can visually inspect removals afterwards
+}
+
+void rtm_node_printer(void *n) {
+  if (n!=NULL) {
+      rtm_object * input_rtm = (rtm_object *)n;
+      printf(" (req: %d, last_sent: %lu) ", input_rtm->sent_msg.req_id, input_rtm->last_sent_tstamp);
+  }
+}
+
+int search_list_req_id(void *n, uint32_t key) {
+    rtm_object * input_rtm = (rtm_object *)n;
+    return input_rtm->sent_msg.req_id == key;
 }
 
 /*

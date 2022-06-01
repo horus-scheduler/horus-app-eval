@@ -10,6 +10,8 @@
 #include <sys/queue.h>
 #include <time.h>
 #include <endian.h>
+#include <stdbool.h>
+#include <unistd.h> 
 
 #include <rte_cycles.h>
 #include <rte_debug.h>
@@ -26,8 +28,10 @@
 #include <rte_per_lcore.h>
 #include <rte_udp.h>
 
+#include "ll.h"
 #include "util.h"
 #include "set.h"
+
 
 /*
  * SAQR: Defines the ID of spine scheduler (each scheduler has a unique static ID),
@@ -52,6 +56,8 @@
 /*
  * custom types
  */
+#define RETRANS_THRESHOLD 100000 // ns
+#define RETRANS_CHECK_INTERVAL 50000 // ns
 
 /********* Configs *********/
 char ip_client[][32] = {
@@ -84,6 +90,7 @@ uint32_t req_id_core[8] = {0};
 
 /********* Results *********/
 uint64_t pkt_sent = 0;
+uint64_t pkt_resent = 0;
 uint64_t pkt_recv = 0;
 LatencyResults latency_results = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0};
 
@@ -92,6 +99,8 @@ SearchResults search_results = {NULL, NULL, NULL, NULL, NULL};
 /********* Debug the us *********/
 uint64_t work_ns_sample[1048576] = {0};
 uint32_t sample_idx = 0;
+
+ll_t *list; // Shared list between sender, receiver and arbiter threads
 
 /*
  * functions called when program ends
@@ -176,7 +185,7 @@ static void dump_stats_to_file() {
 
 static void sigint_handler(int sig) {
   double req_recv_ratio = (double)pkt_recv / (double)req_id;
-  double recv_ratio = (double)pkt_recv / (double)pkt_sent;
+  double recv_ratio = (double)pkt_recv / (double)(pkt_sent + pkt_resent);
   printf("\nRequests sent: %u\n", req_id);
   printf("Packets sent: %lu\n", pkt_sent);
   printf("Responses/Packets received: %lu\n", pkt_recv);
@@ -199,6 +208,14 @@ static void sigint_handler(int sig) {
   rte_exit(EXIT_SUCCESS, "\nStopped DPDK client\n");
 }
 
+static void insert_to_rtm_list (Message *req, uint64_t tstamp, unsigned int tx_count) {
+  rtm_object *rtm1 = malloc(sizeof *rtm1); 
+  rtm1->last_sent_tstamp=tstamp;
+  rtm1->sent_msg = *req;
+  rtm1->tx_count = ++tx_count;
+  ll_insert_last(list, rtm1);
+}
+
 /*
  * functions
  */
@@ -210,7 +227,7 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
                             uint64_t gen_ns, uint64_t run_ns, int port_offset,
                             int app_type,
                             uint64_t app_data[]) {
-  struct lcore_configuration *lconf = &lcore_conf[lcore_id];
+  
   assert(mbuf != NULL);
 
   mbuf->next = NULL;
@@ -264,11 +281,11 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   
   req->qlen = 0;
   
-  
   // SAQR: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
   req->client_id = (CLIENT_ID<<8);
   
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];
+  printf("GEN, request id: %u, gen_ns: %lu\n", req->req_id, gen_ns);
   req->seq_num = SWAP_UINT16((uint16_t)(req->req_id));
   req->pkts_length = pkts_length;
   req->gen_ns = gen_ns; // INFO: Req generation time (for calculations)
@@ -279,11 +296,55 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
       req->app_data[i] = app_data[i];
     }
   }
+  // Keep a copy of the original request for retransmission, will be freed when response is received
+  insert_to_rtm_list(req, gen_ns, 0);
+
   // printf("request client_id: %u, req_id: %u\n",req->client_id,req->req_id);
   mbuf->data_len += sizeof(Message);
   mbuf->pkt_len += sizeof(Message);
 
   pkt_sent++;
+}
+
+static void make_resubmit_packet(struct rte_mbuf *mbuf, rtm_object *origin, uint64_t gen_ns) {
+  assert(mbuf != NULL);
+
+  mbuf->next = NULL;
+  mbuf->nb_segs = 1;
+  mbuf->ol_flags = 0;
+  mbuf->data_len = 0;
+  mbuf->pkt_len = 0;
+
+  // init packet header
+  struct ether_hdr *eth = rte_pktmbuf_mtod(mbuf, struct ether_hdr *);
+  struct ipv4_hdr *ip =
+      (struct ipv4_hdr *)((uint8_t *)eth + sizeof(struct ether_hdr));
+  struct udp_hdr *udp =
+      (struct udp_hdr *)((uint8_t *)ip + sizeof(struct ipv4_hdr));
+  rte_memcpy(eth, header_template, sizeof(header_template));
+  mbuf->data_len += sizeof(header_template);
+  mbuf->pkt_len += sizeof(header_template);
+  // init req msg
+  Message *req = (Message *)((uint8_t *)eth + sizeof(header_template));
+
+  eth->d_addr.addr_bytes[0] = 0xF8;
+  eth->d_addr.addr_bytes[1] = 0xF2;
+  eth->d_addr.addr_bytes[2] = 0x1E;
+  eth->d_addr.addr_bytes[3] = 0x3A;
+  eth->d_addr.addr_bytes[4] = 0x13;
+  eth->d_addr.addr_bytes[5] = 0x00;
+  inet_pton(AF_INET, ip_client[client_index], &(ip->src_addr));
+  inet_pton(AF_INET, ip_server[server_index], &(ip->dst_addr));
+  udp->src_port = htons(src_port);
+  udp->dst_port = htons(dst_port);
+  *req = origin->sent_msg; // Copy the origin request to the new req header
+
+  insert_to_rtm_list(req, gen_ns, origin->tx_count);
+
+  mbuf->data_len += sizeof(Message);
+  mbuf->pkt_len += sizeof(Message);
+
+  pkt_resent++;
 }
 
 static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
@@ -302,17 +363,22 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   
   uint8_t server_idx = ntohl(ip->src_addr) - 167837696;
   // debug
-  // printf("client_id:%u, req_id:%u\n",res->client_id, res->req_id);
+
+  
+  //ll_print(*list);
   uint64_t cur_ns = get_cur_ns();
+
+  //printf("cur_ns %lu\n",cur_ns);
   uint16_t reply_port = ntohs(udp->src_port);
   // printf("reply_port:%u\n",reply_port);
   uint64_t reply_run_ns = rte_le_to_cpu_64(res->run_ns);
   assert(cur_ns > res->gen_ns);
   uint64_t sjrn = cur_ns - res->gen_ns;  // diff in time
+  printf("Rx, client_id:%u, req_id:%u, gen_ns:%lu, sjrn_us:%lu\n",res->client_id, res->req_id, res->gen_ns, sjrn/1000);
   latency_results.sjrn_times[latency_results.count] = sjrn;
   //printf("\nresponse time: %u\n", sjrn);
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
-  
+  ll_remove_search(list, search_list_req_id, res->req_id);
   if (is_rocksdb == 1) { // INFO: Used for calculating ratio of response time to actual task running time (note: scheduler is not aware of the actual running times)
       if (res->run_ns == 0)
         res->run_ns = 650000;
@@ -703,6 +769,43 @@ static void rx_loop(uint32_t lcore_id) {
   }
 }
 
+static void arbiter_loop(uint32_t lcore_id) {
+  struct lcore_configuration *lconf = &lcore_conf[lcore_id];
+  printf("%lld entering Arbiter loop (timout check) on lcore %u\n",
+         (long long)time(NULL), lcore_id);
+  uint64_t start_ns = get_cur_ns();
+  uint64_t elapsed_ns = 0;
+  struct rte_mbuf *mbuf;
+
+  while (1) {
+    if (elapsed_ns >= RETRANS_CHECK_INTERVAL) {
+      //ll_print(*list);
+      bool need_retrans = 1;
+      while (need_retrans) {
+        rtm_object *first = (rtm_object *)ll_get_first(list);
+        if (!first)
+          continue;
+        if (get_cur_ns() < first->last_sent_tstamp) // Not sent yet
+          continue;
+        if (get_cur_ns() - first->last_sent_tstamp >= RETRANS_THRESHOLD) { // Need to retransmit the packet
+            mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
+            uint64_t retrans_tstamp = get_cur_ns();
+            make_resubmit_packet(mbuf, first, retrans_tstamp);
+            printf("\n Resending: %d\n", first->sent_msg.req_id);
+            ll_remove_search(list, search_list_req_id, first->sent_msg.req_id);
+            enqueue_pkt(lcore_id, mbuf);
+            send_pkt_burst(lcore_id);
+        } else { // No more timeouts for this round check at next interval
+          need_retrans = 0;
+        }
+      }
+      start_ns = get_cur_ns();
+    }
+    elapsed_ns = get_cur_ns() - start_ns;
+  }
+}
+
+
 // main processing loop for client
 static int32_t client_loop(__attribute__((unused)) void *arg) {
   uint32_t lcore_id = rte_lcore_id();
@@ -710,8 +813,10 @@ static int32_t client_loop(__attribute__((unused)) void *arg) {
   if (is_latency_client > 0) {
     if (lcore_id == 0) {
       rx_loop(lcore_id);
-    } else {
+    } else if (lcore_id == 1) {
       tx_loop(lcore_id);
+    } else { // arbiter loop
+      arbiter_loop(lcore_id);
     }
   } else {
     tx_loop(lcore_id);
@@ -821,6 +926,20 @@ int main(int argc, char **argv) {
   int ret;
   uint32_t lcore_id;
 
+  list = ll_new(num_teardown);
+  list->val_printer = rtm_node_printer;
+  rtm_object *rtm1 = malloc(sizeof *rtm1); 
+  rtm1->last_sent_tstamp=50;
+  rtm1->sent_msg.req_id = 200;
+  rtm_object *rtm2 = malloc(sizeof *rtm1); 
+  rtm2->last_sent_tstamp=50;
+  rtm2->sent_msg.req_id = 500;
+  // ll_insert_first(list, rtm1);
+  // ll_insert_last(list, rtm2);
+  // ll_print(*list);
+  // ll_remove_search(list, search_list_req_id, 500);
+  // ll_print(*list);
+  
   // parse eal arguments
   ret = rte_eal_init(argc, argv);
   if (ret < 0) {
