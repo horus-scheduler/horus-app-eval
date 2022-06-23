@@ -1,5 +1,5 @@
 /*******************************************************************************
-***     
+***     Modified by Parham to use uint64 keys instead of string.
 ***     Author: Tyler Barrus
 ***     email:  barrust@gmail.com
 ***

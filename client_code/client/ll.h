@@ -68,6 +68,12 @@ struct ll {
 
 /* function prototypes */
 
+void *get_node_data(void *input);
+
+void *get_next_node_data(ll_t *list, void *input);
+
+int ll_remove_node_after(ll_t *list, void *prev_node);
+
 // returns a pointer to an allocated linked list.
 // needs a taredown function that is called with
 // a pointer to the value when it is being deleted.
@@ -79,15 +85,15 @@ void ll_delete(ll_t *list);
 // inserts a value into the linked list at position `n`. acceptable values for n are `0`
 // (puts it in first) to `list->len` (puts it in last).
 // returns the new length of the linked list if successful, -1 otherwise
-int ll_insert_n(ll_t *list, void *val, int n);
+void *ll_insert_n(ll_t *list, void *val, int n);
 
 // puts a value at the front of the linked list.
 // returns the new length of the linked list if successful, -1 otherwise
-int ll_insert_first(ll_t *list, void *val);
+void *ll_insert_first(ll_t *list, void *val);
 
 // puts a value at the end of the linked list.
 // returns the new length of the linked list if successful, -1 otherwise
-int ll_insert_last(ll_t *list, void *val);
+void *ll_insert_last(ll_t *list, void *val);
 
 // removes the value at position n of the linked list.
 // returns the new length of the linked list if successful, -1 otherwise
@@ -100,7 +106,9 @@ int ll_remove_first(ll_t *list);
 // given a function that tests the values in the linked list, the first element that
 // satisfies that function is removed.
 // returns the new length of the linked list if successful, -1 otherwise
-int ll_remove_search(ll_t *list, int cond(void *, uint32_t), uint32_t key);
+int ll_remove_search(ll_t *list, int cond(void *, uint32_t), uint32_t key, void *prev_data, size_t prev_len);
+
+void *ll_search(ll_t *list, int cond(void *, uint32_t), uint32_t key);
 
 // returns a pointer to the `n`th value in the linked list.
 // returns `NULL` if unsuccessful

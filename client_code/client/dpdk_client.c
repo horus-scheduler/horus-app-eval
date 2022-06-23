@@ -31,7 +31,7 @@
 #include "ll.h"
 #include "util.h"
 #include "set.h"
-
+#include "hashtable.h"
 
 /*
  * SAQR: Defines the ID of spine scheduler (each scheduler has a unique static ID),
@@ -56,9 +56,10 @@
 /*
  * custom types
  */
-#define RETRANS_THRESHOLD 100000 // ns
-#define RETRANS_CHECK_INTERVAL 50000 // ns
+#define RETRANS_THRESHOLD 200000000 // ns
+#define RETRANS_CHECK_INTERVAL 1000000000 // ns
 
+#define HASHTABLE_BUCKETS 5
 /********* Configs *********/
 char ip_client[][32] = {
     "10.1.0.1", "10.1.0.2", "10.1.0.3", "10.1.0.4",  "10.1.0.5",  "10.1.0.6",
@@ -101,7 +102,7 @@ uint64_t work_ns_sample[1048576] = {0};
 uint32_t sample_idx = 0;
 
 ll_t *list; // Shared list between sender, receiver and arbiter threads
-
+hashtable_t *table;
 /*
  * functions called when program ends
  */
@@ -213,7 +214,10 @@ static void insert_to_rtm_list (Message *req, uint64_t tstamp, unsigned int tx_c
   rtm1->last_sent_tstamp=tstamp;
   rtm1->sent_msg = *req;
   rtm1->tx_count = ++tx_count;
-  ll_insert_last(list, rtm1);
+  void* prev_node_ptr = ll_insert_last(list, rtm1);
+  printf("Inserted in rtm \n");
+  ht_insert(table, req->req_id, prev_node_ptr); // Store <req_id, address>
+  printf("Inserted in HT \n");
 }
 
 /*
@@ -378,7 +382,23 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   latency_results.sjrn_times[latency_results.count] = sjrn;
   //printf("\nresponse time: %u\n", sjrn);
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
-  ll_remove_search(list, search_list_req_id, res->req_id);
+
+  hashtable_item deleted;
+  int ret;
+  ret = ht_delete(table, res->req_id, &deleted, sizeof(deleted));
+  if (ret == -1) {
+    printf("[RX] HT Delete failed\n");
+  } else {
+    printf("[RX] Deleted from hashtable: %d\n", deleted.key);
+    ll_remove_node_after(list, deleted.value); // value is the address of the previous node to be deleted!
+    rtm_object *new_next_of_prev_node = (rtm_object*) get_next_node_data(list, deleted.value);
+    if(new_next_of_prev_node != NULL) {
+      ht_modify(table, new_next_of_prev_node->sent_msg.req_id, deleted.value); // update map <req_id of next, address of curr>  
+    }
+  }
+  
+  //ll_remove_search(list, search_list_req_id, res->req_id, NULL, 0);
+
   if (is_rocksdb == 1) { // INFO: Used for calculating ratio of response time to actual task running time (note: scheduler is not aware of the actual running times)
       if (res->run_ns == 0)
         res->run_ns = 650000;
@@ -779,20 +799,38 @@ static void arbiter_loop(uint32_t lcore_id) {
 
   while (1) {
     if (elapsed_ns >= RETRANS_CHECK_INTERVAL) {
-      //ll_print(*list);
+      
       bool need_retrans = 1;
       while (need_retrans) {
         rtm_object *first = (rtm_object *)ll_get_first(list);
         if (!first)
-          continue;
+          break;
+        
         if (get_cur_ns() < first->last_sent_tstamp) // Not sent yet
-          continue;
+          break;
         if (get_cur_ns() - first->last_sent_tstamp >= RETRANS_THRESHOLD) { // Need to retransmit the packet
+            ll_print(*list);
             mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
             uint64_t retrans_tstamp = get_cur_ns();
+            printf("\n[Arbiter] Resending: %d\n", first->sent_msg.req_id);
+            hashtable_item deleted;
+            int ret;
+            ret = ht_delete(table, first->sent_msg.req_id, &deleted, sizeof(deleted));
+            if (ret == -1) {
+              printf("[Arbiter] HT Delete failed\n");
+              break;
+            }
+            printf("[Arbiter] Deleted from hashtable: %d\n", deleted.key);
             make_resubmit_packet(mbuf, first, retrans_tstamp);
-            printf("\n Resending: %d\n", first->sent_msg.req_id);
-            ll_remove_search(list, search_list_req_id, first->sent_msg.req_id);
+            ll_remove_node_after(list, deleted.value); // value is the address of the previous node to be deleted!
+            rtm_object *new_next_of_prev_node = (rtm_object*) get_next_node_data(list, deleted.value);
+            if(new_next_of_prev_node != NULL) {
+              ht_modify(table, new_next_of_prev_node->sent_msg.req_id, deleted.value); // update map <req_id of next, address of curr>  
+            }
+            print_table(table);
+            
+            ll_print(*list);
+            //ll_remove_search(list, search_list_req_id, first->sent_msg.req_id, NULL, 0);
             enqueue_pkt(lcore_id, mbuf);
             send_pkt_burst(lcore_id);
         } else { // No more timeouts for this round check at next interval
@@ -927,6 +965,7 @@ int main(int argc, char **argv) {
   uint32_t lcore_id;
 
   list = ll_new(num_teardown);
+  table = ht_create(HASHTABLE_BUCKETS, 0, NULL);
   list->val_printer = rtm_node_printer;
   rtm_object *rtm1 = malloc(sizeof *rtm1); 
   rtm1->last_sent_tstamp=50;
@@ -934,6 +973,9 @@ int main(int argc, char **argv) {
   rtm_object *rtm2 = malloc(sizeof *rtm1); 
   rtm2->last_sent_tstamp=50;
   rtm2->sent_msg.req_id = 500;
+  
+  //ht_test();
+  
   // ll_insert_first(list, rtm1);
   // ll_insert_last(list, rtm2);
   // ll_print(*list);

@@ -35,7 +35,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <string.h>
 #include "ll.h"
 
 /* macros */
@@ -69,6 +69,28 @@ struct ll_node {
     pthread_rwlock_t m;
 };
 
+void *get_node_data(void *input) {
+    ll_node_t *node_ptr = (ll_node_t *) input;
+    return node_ptr->val;
+}
+
+void *get_next_node_data(ll_t *list, void *input) {
+    if (input == NULL) {
+        printf("get_next_node_data its NULL\n");
+        if (list->hd != NULL)
+            return list->hd->val;
+        else
+            return NULL;
+    }
+    ll_node_t *node_ptr = (ll_node_t *) input;
+    ll_node_t *res;
+    RWLOCK(l_read, node_ptr->m);
+    res = node_ptr->nxt;
+    RWUNLOCK(node_ptr->m);
+    if (res == NULL)
+        return NULL;
+    return res->val;
+}
 /**
  * @function ll_new
  *
@@ -192,19 +214,19 @@ int ll_select_n_min_1(ll_t *list, ll_node_t **node, int n, locktype_t lt) {
  *
  * @returns 0 if successful, -1 otherwise
  */
-int ll_insert_n(ll_t *list, void *val, int n) {
+void *ll_insert_n(ll_t *list, void *val, int n) {
     ll_node_t *new_node = ll_new_node(val);
-
+    printf("insert addr: %lu\n", (uint64_t)new_node);
+    ll_node_t *nth_node;
     if (n == 0) { // nth_node is list->hd
         RWLOCK(l_write, list->m);
         new_node->nxt = list->hd;
         list->hd = new_node;
         RWUNLOCK(list->m);
     } else {
-        ll_node_t *nth_node;
         if (ll_select_n_min_1(list, &nth_node, n, l_write)) {
             free(new_node);
-            return -1;
+            return NULL;
         }
         new_node->nxt = nth_node->nxt;
         nth_node->nxt = new_node;
@@ -214,8 +236,9 @@ int ll_insert_n(ll_t *list, void *val, int n) {
     RWLOCK(l_write, list->m);
     (list->len)++;
     RWUNLOCK(list->m);
-
-    return list->len;
+    if (n==0)
+        return NULL;
+    return nth_node;
 }
 
 /**
@@ -228,7 +251,7 @@ int ll_insert_n(ll_t *list, void *val, int n) {
  *
  * @returns the new length of thew linked list on success, -1 otherwise
  */
-int ll_insert_first(ll_t *list, void *val) {
+void *ll_insert_first(ll_t *list, void *val) {
     return ll_insert_n(list, val, 0);
 }
 
@@ -242,7 +265,7 @@ int ll_insert_first(ll_t *list, void *val) {
  *
  * @returns the new length of thew linked list on success, -1 otherwise
  */
-int ll_insert_last(ll_t *list, void *val) {
+void *ll_insert_last(ll_t *list, void *val) {
     return ll_insert_n(list, val, list->len);
 }
 
@@ -257,6 +280,7 @@ int ll_insert_last(ll_t *list, void *val) {
  * @returns the new length of thew linked list on success, -1 otherwise
  */
 int ll_remove_n(ll_t *list, int n) {
+    printf("removing %d\n", n);
     ll_node_t *tmp;
     if (n == 0) {
         RWLOCK(l_write, list->m);
@@ -278,7 +302,31 @@ int ll_remove_n(ll_t *list, int n) {
 
     list->val_teardown(tmp->val);
     free(tmp);
+    printf("Finished removing %d\n", n);
+    return list->len;
+}
 
+int ll_remove_node_after(ll_t *list, void *prev_node) {
+    printf("ll_remove_node_after\n");
+    if (prev_node == NULL) {
+        printf("CALLING REMOVE FIRST\n");
+        return ll_remove_first(list);
+    }
+    //printf("HERE!!\n");
+    ll_node_t *tmp;
+    ll_node_t *nth_node = (ll_node_t *)prev_node;
+    RWLOCK(l_write, nth_node->m);
+    tmp = nth_node->nxt;
+    nth_node->nxt = nth_node->nxt == NULL ? NULL : nth_node->nxt->nxt;
+    RWUNLOCK(nth_node->m);
+    RWLOCK(l_write, list->m);
+    (list->len)--;
+    RWUNLOCK(list->m);
+    if (tmp != NULL){
+        list->val_teardown(tmp->val);
+        free(tmp);
+    }
+    
     return list->len;
 }
 
@@ -306,7 +354,7 @@ int ll_remove_first(ll_t *list) {
  *
  * @returns the new length of thew linked list on success, -1 otherwise
  */
-int ll_remove_search(ll_t *list, int cond(void *, uint32_t), uint32_t key) {
+int ll_remove_search(ll_t *list, int cond(void *, uint32_t), uint32_t key, void *prev_data, size_t prev_len) {
     ll_node_t *last = NULL;
     ll_node_t *node = list->hd;
     while ((node != NULL) && !(cond(node->val, key))) {
@@ -325,7 +373,14 @@ int ll_remove_search(ll_t *list, int cond(void *, uint32_t), uint32_t key) {
         last->nxt = node->nxt;
         RWUNLOCK(last->m);
     }
-
+    printf("Before memcpy\n");
+    printf("%lu\n", prev_len);
+    if (prev_len != 0) { // Copy the prev value to the container provided before freeing
+        RWLOCK(l_read, node->m);
+        memcpy(prev_data, node->val, prev_len);
+        RWUNLOCK(node->m);
+    }
+    printf("After memcpy\n");
     list->val_teardown(node->val);
     free(node);
 
@@ -334,6 +389,34 @@ int ll_remove_search(ll_t *list, int cond(void *, uint32_t), uint32_t key) {
     RWUNLOCK(list->m);
 
     return list->len;
+}
+
+/**
+ * @function ll_search
+ *
+ * Returns the first item in the list whose value returns 1 if `cond()` is called on it.
+ *
+ * @param list - the linked list
+ * @param cond - a function that will be called on the values of each node. It should
+ * return 1 of the element matches.
+ *
+ * @returns the `val` attribute of the matched element of `list`.
+ */
+void *ll_search(ll_t *list, int cond(void *, uint32_t), uint32_t key) {
+    ll_node_t *last = NULL;
+    ll_node_t *node = list->hd;
+    if (node == NULL)
+        return NULL;
+    
+    while ((node != NULL) && !(cond(node->val, key))) {
+        last = node;
+        node = node->nxt;
+    }
+
+    if (node == NULL) 
+        return NULL;
+    
+    return node->val;
 }
 
 /**

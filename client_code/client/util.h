@@ -563,7 +563,7 @@ static void init(void) {
 
 void num_teardown(void *n) {
     rtm_object *input_rtm = (rtm_object *)n;
-    input_rtm->last_sent_tstamp = 0; // just so we can visually inspect removals afterwards
+    input_rtm->last_sent_tstamp = 1099; // just so we can visually inspect removals afterwards
 }
 
 void rtm_node_printer(void *n) {
