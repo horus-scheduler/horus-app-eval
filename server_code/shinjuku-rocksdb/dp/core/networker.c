@@ -82,6 +82,8 @@ int send_keep_alive(uint64_t seq_num) {
 	
 	log_info("Sending Keepalive\n");
 	resp.pkt_type = PKT_TYPE_KEEP_ALIVE;
+	resp.src_id = CFG.ports[0];
+	resp.dst_id = CFG.parent_leaf_id;
 	resp.client_id = CFG.ports[0]; // Use first worker ID as client ID.
 	resp.req_id = seq_num;
 	resp.qlen = (uint16_t) CFG.num_ports;
