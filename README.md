@@ -8,6 +8,14 @@ The modified parts are commented with tag *SAQR* in the source code.
 - *server_code* folder contains the code that runs on worker machines that serve the tasks.
 - *client_code* folder contains the code that runs on clients, generates the requests, sends them to network and captures the replies from workers.
 
+# Note on Deploy Keys
+This is specific to our current testbed. Each machine involved in the experiments has a deploy key, which is configured as follows:
+
+* The deploy key is located in `/local-scratch/.ssh/`
+* The identity file is configured in `/home/<user>/.ssh/config` (LATER: needs to be in `/local-scratch/.ssh`)
+* To clone a repo, use the following command: `git clone git@github.com-repo-saqr-app-eval:horus-scheduler/saqr-app-eval.git`
+* The current location of this repo is `/local-scratch/saqr-app-eval`
+	
 ------
 # Setting up worker machines
 These steps need to be done only once for setting up the worker machines
