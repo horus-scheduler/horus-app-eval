@@ -12,7 +12,8 @@ APP = dpdk_client
 
 # all source are stored in SRCS-y
 SRCS-y := dpdk_client.c \
-	  set.c
+	  set.c \
+          ll.c
 
 CFLAGS += -O3 # -g for gdb debugging
 #CFLAGS += $(WERROR_FLAGS)
