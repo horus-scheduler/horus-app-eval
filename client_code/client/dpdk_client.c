@@ -57,7 +57,7 @@
  * custom types
  */
 #define RETRANS_THRESHOLD 100000 // ns
-#define RETRANS_CHECK_INTERVAL 50000 // ns
+#define RETRANS_CHECK_INTERVAL 500000 // ns
 
 /********* Configs *********/
 char ip_client[][32] = {
@@ -285,7 +285,7 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   req->client_id = (CLIENT_ID<<8);
   
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];
-  printf("GEN, request id: %u, gen_ns: %lu\n", req->req_id, gen_ns);
+  //printf("TXLOOP: GEN, request id: %u, gen_ns: %lu\n", req->req_id, gen_ns);
   req->seq_num = SWAP_UINT16((uint16_t)(req->req_id));
   req->pkts_length = pkts_length;
   req->gen_ns = gen_ns; // INFO: Req generation time (for calculations)
@@ -298,7 +298,7 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   }
   // Keep a copy of the original request for retransmission, will be freed when response is received
   insert_to_rtm_list(req, gen_ns, 0);
-
+  //printf("TXLOOP: inserted, request id: %u\n", req->req_id);
   // printf("request client_id: %u, req_id: %u\n",req->client_id,req->req_id);
   mbuf->data_len += sizeof(Message);
   mbuf->pkt_len += sizeof(Message);
@@ -780,21 +780,23 @@ static void arbiter_loop(uint32_t lcore_id) {
   while (1) {
     if (elapsed_ns >= RETRANS_CHECK_INTERVAL) {
       //ll_print(*list);
-      bool need_retrans = 1;
+      int need_retrans = 1;
       while (need_retrans) {
         rtm_object *first = (rtm_object *)ll_get_first(list);
         if (!first)
-          continue;
+          break;
         if (get_cur_ns() < first->last_sent_tstamp) // Not sent yet
-          continue;
+          break;
         if (get_cur_ns() - first->last_sent_tstamp >= RETRANS_THRESHOLD) { // Need to retransmit the packet
             mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
             uint64_t retrans_tstamp = get_cur_ns();
+            printf("Resending: %d, size of rxmt list %d\n", first->sent_msg.req_id, list->len);
             make_resubmit_packet(mbuf, first, retrans_tstamp);
-            printf("\n Resending: %d\n", first->sent_msg.req_id);
+            //printf("Removing old %d request\n\n", first->sent_msg.req_id);
             ll_remove_search(list, search_list_req_id, first->sent_msg.req_id);
             enqueue_pkt(lcore_id, mbuf);
             send_pkt_burst(lcore_id);
+            --need_retrans;
         } else { // No more timeouts for this round check at next interval
           need_retrans = 0;
         }
@@ -969,4 +971,3 @@ int main(int argc, char **argv) {
 
   return 0;
 }
-
