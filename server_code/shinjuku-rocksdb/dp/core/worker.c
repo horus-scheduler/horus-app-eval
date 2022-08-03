@@ -188,11 +188,13 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     // log_info("Generic work being executed on %d\n", cpu_nr_);
     // log_info("queue_length %d: %d\n", cpu_nr_, queue_length[cpu_nr_]);
     // log_info("worker_state %d: %d\n", cpu_nr_, worker_state[cpu_nr_]);
-    
-    if (req->client_id == ROCKSDB_CLIENT) {
+    uint16_t client_id = SWAP_UINT16(req->client_id);
+    if (client_id == ROCKSDB_CLIENT) {
         rocksdb_work(req);
-    } else if (req->client_id == SEARCH_CLIENT) {
+    } else if (client_id == SEARCH_CLIENT) {
         intersection_res = search_work(req);
+    } else {
+        log_info("Unknown Client ID %d\n", client_id);
     }
     
 
@@ -208,7 +210,7 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     
     asm volatile ("cli":::);
     struct message resp;
-    if (req->client_id == SEARCH_CLIENT) { // Write additional search result data to pkt
+    if (client_id == SEARCH_CLIENT) { // Write additional search result data to pkt
         uint64_t intersection_size = intersection_res[0];
         resp.runNs = intersection_size;
         for (unsigned i = 0; i < intersection_size; i++) {
