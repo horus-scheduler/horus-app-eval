@@ -57,6 +57,7 @@ struct cfg_parameters {
 	struct pci_addr ethdev[CFG_MAX_ETHDEV];
 	uint64_t keep_alive_interval_us;
 	uint16_t parent_leaf_id;
+	uint16_t server_id;
 	int num_ports;
 	uint16_t ports[CFG_MAX_PORTS];
 

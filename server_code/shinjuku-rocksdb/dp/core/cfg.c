@@ -65,6 +65,7 @@ static int parse_queue_settings(void);
 static int parse_preemption_delay(void);
 static int parse_keep_alive_interval(void);
 static int parse_parent_leaf_id(void);
+static int parse_server_id(void);
 static int parse_gateway_addr(void);
 static int parse_arp(void);
 static int parse_devices(void);
@@ -84,6 +85,7 @@ static struct config_vector_t config_tbl[] = {
 	{ "preemption_delay", parse_preemption_delay},
 	{ "keep_alive_interval", parse_keep_alive_interval},
 	{ "parent_leaf_id", parse_parent_leaf_id},
+	{ "server_id", parse_server_id},
 	{ "gateway_addr", parse_gateway_addr},
 	{ "arp",          parse_arp},
 	{ "devices",      parse_devices},
@@ -208,6 +210,18 @@ static int parse_parent_leaf_id(void)
 		return -EINVAL;
 	leaf_id = config_setting_get_int(leaf_id_conf);
 	CFG.parent_leaf_id = (uint16_t) leaf_id;
+	return 0;
+}
+
+static int parse_server_id(void)
+{
+	const config_setting_t *server_id_conf = NULL;
+	uint16_t server_id;
+	server_id_conf = config_lookup(&cfg, "server_id");
+	if (!server_id_conf)
+		return -EINVAL;
+	server_id = config_setting_get_int(server_id_conf);
+	CFG.server_id = (uint16_t) server_id;
 	return 0;
 }
 

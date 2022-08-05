@@ -394,9 +394,11 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
     
     
     if (pkt_type == PKT_TYPE_WORKER_ID) {
-            log_info("\n Setting new worker IDs for cores. pkt_type: %u \n", pkt_type);
+            uint16_t new_first_id = SWAP_UINT16(msg->qlen) + 1;
+            log_info("\n Setting new worker IDs for cores. pkt_type: %u new IDs starting from %d\n", pkt_type, new_first_id);
             for (int i=0; i < CFG.num_ports; i++) {
-                    CFG.ports[i] = msg->app_data[i];
+                log_info("WorkerID [%d] = %d\n", i, new_first_id + i);
+                CFG.ports[i] = new_first_id + i;
             }
             // Reply pkt should be handled by the networker
             *core_id = CFG.cpu[CFG_CPU_NETWORKER_INDEX]; 
