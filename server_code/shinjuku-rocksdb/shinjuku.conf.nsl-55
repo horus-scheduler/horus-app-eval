@@ -28,6 +28,7 @@ gateway_addr="10.1.0.1"
 # Blanced Setup: uncomment below
 port=[1, 2, 3, 4, 5, 6, 7, 8]
 
+
 # Skewed Setup: uncomment below
 #port=[1, 2, 3, 4, 17, 18, 19, 20]
 
@@ -41,6 +42,15 @@ queue_setting=[false]
 
 ## preemption_delay: preemption time quantum in ns.
 preemption_delay=500000000
+
+## keep_alive_interval: interval between two ping pkts to leaf in us.
+keep_alive_interval=700000
+
+## parent_leaf_id: Used to indicate which leaf this server is communicating to (for keep alive)
+parent_leaf_id=0
+
+## server_id: Used for indicating source of keep alive message 
+server_id=0
 
 ## arp: allows you to add static arp entries in the interface arp table.
 arp=(
