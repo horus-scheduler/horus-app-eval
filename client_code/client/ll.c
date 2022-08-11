@@ -35,7 +35,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-
+#include <string.h>
 #include "ll.h"
 
 /* macros */
@@ -355,6 +355,14 @@ void *ll_get_n(ll_t *list, int n) {
     return node->val;
 }
 
+ll_node_t *ll_get_n_node(ll_t *list, int n) {
+    ll_node_t *node;
+    if (ll_select_n_min_1(list, &node, n + 1, l_read))
+        return NULL;
+
+    return node;
+}
+
 /**
  * @function ll_get_first
  *
@@ -364,8 +372,18 @@ void *ll_get_n(ll_t *list, int n) {
  *
  * @returns the `val` attribute of the first element of `list`.
  */
-void *ll_get_first(ll_t *list) {
-    return ll_get_n(list, 0);
+void *ll_get_first(ll_t *list, void* value, size_t length) {
+
+    ll_node_t *node = ll_get_n_node(list, 0);
+    if (!node) {
+        return NULL;
+    }
+    if (!node->val) {
+        return NULL;
+    }
+    memcpy(value, node->val, length);
+    RWUNLOCK(node->m);
+    return node->val;
 }
 
 /**
