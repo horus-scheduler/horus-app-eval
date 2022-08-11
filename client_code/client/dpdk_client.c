@@ -374,11 +374,14 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   uint64_t reply_run_ns = rte_le_to_cpu_64(res->run_ns);
   assert(cur_ns > res->gen_ns);
   uint64_t sjrn = cur_ns - res->gen_ns;  // diff in time
-  printf("Rx, client_id:%u, req_id:%u, gen_ns:%lu, sjrn_us:%lu\n",res->client_id, res->req_id, res->gen_ns, sjrn/1000);
+  //printf("Rx, client_id:%u, req_id:%u, gen_ns:%lu, sjrn_us:%lu\n",res->client_id, res->req_id, res->gen_ns, sjrn/1000);
   latency_results.sjrn_times[latency_results.count] = sjrn;
   //printf("\nresponse time: %u\n", sjrn);
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
-  ll_remove_search(list, search_list_req_id, res->req_id);
+  int ret = ll_remove_search(list, search_list_req_id, res->req_id);
+  // if (ret == -1) {
+  //   printf("Removing request %u failed \n", res->req_id);
+  // }
   if (is_rocksdb == 1) { // INFO: Used for calculating ratio of response time to actual task running time (note: scheduler is not aware of the actual running times)
       if (res->run_ns == 0)
         res->run_ns = 650000;
@@ -394,7 +397,7 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   latency_results.queue_lengths[latency_results.count][0] =
       (res->qlen) >> 8;
   latency_results.count++;
-  if (reply_run_ns >= 100000000) {  //@muh: changes for long and short out file differ
+  if (reply_run_ns == 0) {
       // long request
       latency_results.sjrn_times_long[latency_results.count_long] = sjrn;
       latency_results.work_ratios_long[latency_results.count_long] = sjrn / res->run_ns;
@@ -782,20 +785,25 @@ static void arbiter_loop(uint32_t lcore_id) {
       //ll_print(*list);
       int need_retrans = 1;
       while (need_retrans) {
-        rtm_object *first = (rtm_object *)ll_get_first(list);
-        if (!first)
+        rtm_object first; 
+        rtm_object *first_ptr = ll_get_first(list, (void *)&first, sizeof(first));
+        if (!first_ptr)
           break;
-        if (get_cur_ns() < first->last_sent_tstamp) // Not sent yet
+        if (get_cur_ns() < first.last_sent_tstamp) // Not sent yet
           break;
-        if (get_cur_ns() - first->last_sent_tstamp >= RETRANS_THRESHOLD) { // Need to retransmit the packet
+        if (get_cur_ns() - first.last_sent_tstamp >= RETRANS_THRESHOLD) { // Need to retransmit the packet
             mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
             uint64_t retrans_tstamp = get_cur_ns();
-            printf("Resending: %d, size of rxmt list %d\n", first->sent_msg.req_id, list->len);
-            make_resubmit_packet(mbuf, first, retrans_tstamp);
+            
             //printf("Removing old %d request\n\n", first->sent_msg.req_id);
-            ll_remove_search(list, search_list_req_id, first->sent_msg.req_id);
-            enqueue_pkt(lcore_id, mbuf);
-            send_pkt_burst(lcore_id);
+            int ret = ll_remove_search(list, search_list_req_id, first.sent_msg.req_id);
+            if (ret != -1){
+              //printf("Resending: %u, size of rxmt list %u, waited %lu\n", first.sent_msg.req_id, list->len, get_cur_ns() - first.last_sent_tstamp);
+              make_resubmit_packet(mbuf, &first, retrans_tstamp);
+              enqueue_pkt(lcore_id, mbuf);
+              send_pkt_burst(lcore_id);
+            }
+
             --need_retrans;
         } else { // No more timeouts for this round check at next interval
           need_retrans = 0;
