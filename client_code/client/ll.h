@@ -108,7 +108,7 @@ void *ll_get_n(ll_t *list, int n);
 
 // returns a pointer to the first value in a linked list.
 // `NULL` if empty
-void *ll_get_first(ll_t *list);
+void *ll_get_first(ll_t *list, void* value, size_t length);
 
 // runs f on all values of list
 void ll_map(ll_t *list, gen_fun_t f);
