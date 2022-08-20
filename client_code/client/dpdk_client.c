@@ -82,6 +82,9 @@ uint32_t qps = 20000;       // default qps: 100000
 char *dist_type = "fixed";   // default dist: fixed
 uint32_t scale_factor = 1;   // 1 means the mean is 1us; mean = 1 * scale_factor
 uint32_t is_rocksdb = 0; // 1 means testing with rocksdb, 0 means testing with synthetic workload
+uint32_t dynamic_step_num  = 0; // Number of steps to increase load dynamically, 0 means static load based on initial qps
+uint32_t dynamic_step_size = 20; // Defines the relative increase (%) in qps at each step of load increase. The increase will be linear (+= X% initial_qps)
+uint32_t dynamic_step_interval_ms = 2000; // Time interval between each increase step (ms)
 char *run_name;
 /********* Packet related *********/
 uint32_t req_id = 0;
@@ -297,7 +300,7 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
     }
   }
   // Keep a copy of the original request for retransmission, will be freed when response is received
-  insert_to_rtm_list(req, gen_ns, 0);
+  //insert_to_rtm_list(req, gen_ns, 0);
   //printf("TXLOOP: inserted, request id: %u\n", req->req_id);
   // printf("request client_id: %u, req_id: %u\n",req->client_id,req->req_id);
   mbuf->data_len += sizeof(Message);
@@ -378,7 +381,7 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   latency_results.sjrn_times[latency_results.count] = sjrn;
   //printf("\nresponse time: %u\n", sjrn);
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
-  int ret = ll_remove_search(list, search_list_req_id, res->req_id);
+  //int ret = ll_remove_search(list, search_list_req_id, res->req_id);
   // if (ret == -1) {
   //   printf("Removing request %u failed \n", res->req_id);
   // }
@@ -428,7 +431,11 @@ static void fixed_tx_loop(uint32_t lcore_id, double work_ns) {
   double lambda = qps * 1e-9;
   double mu = 1.0 / lambda;
   init_exp_dist(dist, mu);
-
+  // uint32_t x = 0;
+  // while (x<10000000000) {
+  //   x++;
+  // }
+  // printf("x%d", x);
   printf("lcore %u start sending fixed packets in %" PRIu32 " qps\n", lcore_id,
          qps);
 
@@ -618,22 +625,34 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
          (long long)time(NULL), lcore_id);
 
   struct rte_mbuf *mbuf;
-
-  ExpDist *dist = malloc(sizeof(ExpDist));
-  BimodalDist *work_dist = malloc(sizeof(BimodalDist));
+  ExpDist *dist_list[dynamic_step_num+1]; // first distribution is for initial qps + #dynamic_step_num distributions for increased rates
   double lambda = qps * 1e-9;
   double mu = 1.0 / lambda;
+  for (int i = 0; i <= dynamic_step_num; i++) {
+      printf("Generating distributions step %d\n", i);
+      dist_list[i] = malloc(sizeof(ExpDist));
+      init_exp_dist(dist_list[i], mu);
+      lambda += (dynamic_step_size/ 100) * lambda;
+      mu = 1.0 /lambda;
+  }
+  ExpDist *dist = dist_list[0];
+  BimodalDist *work_dist = malloc(sizeof(BimodalDist));
+  
   uint64_t work_ns;
-  init_exp_dist(dist, mu);
   init_bimodal_dist(work_dist, work_1_ns, work_2_ns, ratio);
-
   printf("lcore %u start sending port bimodal packets in %" PRIu32 " qps\n",
          lcore_id, qps);
 
   signal(SIGINT, sigint_handler);
+
+  uint64_t elapsed_ns = 0;
+  uint32_t dist_index = 0;
+  uint64_t start_ns = get_cur_ns();
+  
   while (1) {
     work_ns = bimodal_dist_work_ns(work_dist);
     uint64_t gen_ns = exp_dist_next_arrival_ns(dist);
+    //printf("next_arrival_us: %f\n", (float)(gen_ns)/1000);
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
@@ -653,8 +672,21 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     while (get_cur_ns() < gen_ns)
       ;
     send_pkt_burst(lcore_id);
+    elapsed_ns = get_cur_ns() - start_ns;
+    if (elapsed_ns > dynamic_step_interval_ms*1e6) {
+        if (dist_index < dynamic_step_size) {
+          printf("lcore %u increasing task rate after taskID = %d\n", lcore_id, req_id_core[lcore_id]);
+          dist_index ++;
+          dist = dist_list[dist_index];
+        } else {
+          printf("lcore %u reached max task rate\n");
+        }
+        start_ns = get_cur_ns();
+    }
   }
-  free_exp_dist(dist);
+  for (int i=0; i<=dynamic_step_size; i++) {
+    free_exp_dist(dist_list[i]);  
+  }
   free_bimodal_dist(work_dist);
 }
 
@@ -874,13 +906,17 @@ static void parse_client_args_help(char *program_name) {
           "Usage: %s -l <WORKING_CORES> -- -l <IS_LATENCY_CLIENT> -c "
           "<CLIENT_IDX> -s <SERVER_ID> -d "
           "<DIST_TYPE> -q "
-          "<QPS_PER_CORE>\n",
+          "<QPS_PER_CORE>"
+          " -n <Experiment Name>"
+          " -k <Number of steps in dynamic load>"
+          " -p <Percentage load increase per step>"
+          " -i <Interval (ms) between steps>\n",
           program_name);
 }
 
 static int parse_client_args(int argc, char **argv) {
   int opt, num;
-  while ((opt = getopt(argc, argv, "l:c:s:d:q:x:r:n:")) != -1) {
+  while ((opt = getopt(argc, argv, "l:c:s:d:q:x:r:n:k:p:i:")) != -1) {
     switch (opt) {
       case 'l':
         num = atoi(optarg);
@@ -908,10 +944,22 @@ static int parse_client_args(int argc, char **argv) {
       case 'r':
         num = atoi(optarg);
         is_rocksdb = num;
+        break;
       case 'n':
         run_name = optarg;
-
-      break;
+        break;
+      case 'p':
+        num = atoi(optarg);
+        dynamic_step_size = num;
+        break;
+      case 'k':
+        num = atoi(optarg);
+        dynamic_step_num = num;
+        break;
+      case 'i':
+        num = atoi(optarg);
+        dynamic_step_interval_ms = num;
+        break;
       default:
         parse_client_args_help(argv[0]);
         return -1;
@@ -925,6 +973,14 @@ static int parse_client_args(int argc, char **argv) {
   printf("Type of distribution: %s\n", dist_type);
   printf("QPS per core: %" PRIu32 "\n\n", qps);
   printf("Result save name: %s\n", run_name);
+  if (dynamic_step_num > 0) {
+    printf("Dynamic #Steps: %d\n", dynamic_step_num);
+    printf("Dynamic increase per step: (%%): %d\n", dynamic_step_size);
+    printf("Dynamic increase interval (ms): %d\n", dynamic_step_interval_ms);
+  } else {
+    printf("Using static QPS load\n");
+  }
+  
   return 0;
 }
 
@@ -968,7 +1024,7 @@ int main(int argc, char **argv) {
   init();
   custom_init();
 
-  // launch main loop in every lcore
+  //launch main loop in every lcore
   rte_eal_mp_remote_launch(client_loop, NULL, CALL_MASTER);
   RTE_LCORE_FOREACH_SLAVE(lcore_id) {
     if (rte_eal_wait_lcore(lcore_id) < 0) {
