@@ -15,8 +15,45 @@ This is specific to our current testbed. Each machine involved in the experiment
 * The identity file is configured in `/home/<user>/.ssh/config` (LATER: needs to be in `/local-scratch/.ssh`)
 * To clone a repo, use the following command: `git clone git@github.com-repo-saqr-app-eval:horus-scheduler/saqr-app-eval.git`
 * The current location of this repo is `/local-scratch/saqr-app-eval`
-	
+
+# Setting Up Nodes with Ansible
+
+Note: This experimental part could be used to prepare all the servers and clients, making them ready to run the processes on them. You can also try to setup the nodes with manual commands in [Setting up worker machines](/README.md#Setting-up-worker-machines). Run all ansible commands in `ansible-setup` directory.
+
+## Create Vault File for Remote SSh User Credential
+
+First, create a `vault-password-file` and write down the decryption key in that. After that, run these following commands
+```
+ansible-vault encrypt_string --vault-id userid@./vault-password-file '<ssh password>' --name 'ansible_password'
+ansible-vault encrypt_string --vault-id userid@./vault-password-file '<sudo password>' --name 'ansible_become_password'
+```
+
+These commands create encrypted strings which could be decrypted by the `vault-password-file`. Fill the file `ansible-setup/groupvars/all` with the output of these commands, and replace "\<user\>" with the correct ssh user. **Caution**: Do not commit the `vault-password-file`.
+. 
+
+
+## Configure the Inventory File
+
+Edit the `inventory.yaml` file and change it to be compatible with your testbed machines. Currently, it is configured based on our original testbed. 
+
+## Run setup command
+
+Setting up the machines (both clients and servers) for the first time, no need to run this playbook again. 
+```
+ansible-playbook -i inventory.yaml --vault-id userid@./vault-password-file setup-playbook.yaml
+```
+
+## Run prepare command
+
+Preparing to run the server processes, this step should be run after every reboot of hosts. 
+```
+ansible-playbook -i inventory.yaml --vault-id userid@./vault-password-file prepare-playbook.yaml
+```
+
+If you run these commands without any error, continue to section [Running Experiments](/README.md##Running-Experiments)
+
 ------
+
 # Setting up worker machines
 These steps need to be done only once for setting up the worker machines
 ## Downgrading Kernel Version to 4.4

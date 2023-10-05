@@ -1,0 +1,69 @@
+---
+- name: Generate Shinjuku Configuration
+  template:
+    src: shinjuku.conf.j2
+    dest: '{{ shinjuku_rocksdb_source_directory }}/shinjuku.conf'
+    force: true
+
+- name: Unload PCIDMA Kernel Module
+  community.general.modprobe:
+    name: pcidma
+    state: absent
+
+- name: Unload Dune Kernel Module
+  community.general.modprobe:
+    name: dune
+    state: absent
+
+- name: Set Huge Page Configuration
+  ansible.builtin.shell:
+    cmd: 'echo "{{ number_of_hugepages_in_each_node }}" > /sys/devices/system/node/node{{ item }}/hugepages/hugepages-2048kB/nr_hugepages'
+  with_sequence: 'start=0 end={{ number_of_nodes_for_hugepages - 1 }}'
+
+- name:  Execute NIC unbind Script
+  ansible.builtin.shell: 
+    cmd: '/usr/bin/python ./deps/dpdk/tools/dpdk_nic_bind.py --force -u {{ item }}'
+    chdir: '{{ shinjuku_rocksdb_source_directory }}'
+  with_items: '{{ nic_ids }}'
+
+- name: Get Kernel Version
+  command: 'uname -r'
+  register: uname_result
+
+- name: Copy a the Dune module
+  ansible.builtin.copy:
+    dest: '/lib/modules/{{ uname_result.stdout }}/dune.ko'
+    src: '{{ shinjuku_rocksdb_deps_directory }}/dune/kern/dune.ko'
+    force: true
+    remote_src: true
+
+- name: Copy a the PCIDMA module
+  ansible.builtin.copy:
+    dest: '/lib/modules/{{ uname_result.stdout }}/pcidma.ko'
+    src: '{{ shinjuku_rocksdb_deps_directory }}/pcidma/pcidma.ko'
+    force: true
+    remote_src: true
+
+- name: Run depmod Command
+  ansible.builtin.shell:
+    cmd: 'depmod -a'
+
+- name: Load PCIDMA Kernel Module
+  community.general.modprobe:
+    name: pcidma
+    state: present
+
+- name: Load Dune Kernel Module
+  community.general.modprobe:
+    name: dune
+    state: present
+
+- name: Setup shinjuku with RocksDB
+  ansible.builtin.shell: 
+    cmd: ./setup.sh
+    chdir: '{{shinjuku_rocksdb_source_directory}}'
+
+- name: Run shinjuku RocksDB After Boot Script
+  ansible.builtin.shell: 
+    cmd: ./after_boot.sh
+    chdir: '{{shinjuku_rocksdb_source_directory}}'

@@ -1,0 +1,39 @@
+---
+- name: Copy Patch File to Dune
+  ansible.builtin.copy:
+    src: '{{ shinjuku_rocksdb_source_directory }}/apic_disable.patch'
+    dest: '{{ shinjuku_rocksdb_deps_directory }}/dune/apic_disable.patch'
+    remote_src: true
+
+- name: Apply Patch on Dune
+  ansible.builtin.shell:
+    cmd: git apply apic_disable.patch
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/dune/'
+
+- name: Make Dune
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/dune/'
+
+- name: Make PCIDMA
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/pcidma/'
+
+- name: Make DPDK Configuration
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/dpdk/'
+    target: config
+    params:
+      T: x86_64-native-linuxapp-gcc
+
+- name: Make DPDK
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/dpdk/'
+
+- name: Make RocksDB static_lib
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/rocksdb/'
+    target: static_lib
+
+- name: Make Opnew
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_deps_directory }}/opnew/'

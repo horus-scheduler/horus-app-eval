@@ -1,0 +1,61 @@
+---
+- name: Build DB Target of RocksDB
+  ansible.builtin.make:
+    chdir: '{{ shinjuku_rocksdb_source_directory }}/db'
+
+- name: Remove Existing DB
+  ansible.builtin.file:
+    path: '{{ shinjuku_rocksdb_source_directory }}/db/my_db'
+    state: absent
+
+- name: Remove Existing DB
+  ansible.builtin.file:
+    path: '{{ shinjuku_rocksdb_source_directory }}/db/my_db'
+    state: absent
+
+- name: Create New DB
+  ansible.builtin.shell: 
+    cmd: './create_db'
+    chdir: '{{ shinjuku_rocksdb_source_directory }}/db'
+
+  with_items: '{{ nic_ids }}'
+
+- name: Copy Existing DB to tmp path
+  ansible.builtin.copy:
+    src: '{{ shinjuku_rocksdb_source_directory }}/db/my_db'
+    dest: '/tmp/my_db'
+    remote_src: true
+    force: true
+
+- name: Clean Existing Shinjuku
+  ansible.builtin.make:
+    target: clean
+    chdir: '{{ shinjuku_rocksdb_source_directory }}'
+
+- name: Make Shinjuku
+  ansible.builtin.make:
+    target: clean
+    chdir: '{{ shinjuku_rocksdb_source_directory }}'
+
+- name: Run Shinjuku
+  ansible.builtin.shell:
+    # cmd: 'LD_PRELOAD={{ shinjuku_rocksdb_deps_directory }}/opnew/dest/libnew.so {{ shinjuku_rocksdb_source_directory }}/dp/shinjuku'
+    executable: "/bin/bash"
+    cmd: 'for ((i = 1; i <= 3; i++)); do echo "hello"; sleep 1; done; echo "message"; for ((i = 1; i <= 100; i++)); do echo "bye"; sleep 1; done'
+    chdir: '{{ shinjuku_rocksdb_source_directory }}'
+  async: 120
+  poll: 0
+  register: shinjuku_result
+
+- name: Wait for the Sending Keep Alive Token
+  async_status:
+    jid: "{{ shinjuku_result.ansible_job_id }}"
+  register: shinjuku_job_result
+  until: '"message" in shinjuku_job_result.stdout_lines'
+  retries: 600  # Total number of retries (600 * 5 seconds = 3000 seconds)
+  delay: 1     # Delay between retries
+
+
+- name: Prompting Server Readiness
+  ansible.builtin.debug:
+    msg: "Target Reached for host {{ ansible_host }}"

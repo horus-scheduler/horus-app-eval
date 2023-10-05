@@ -1,0 +1,122 @@
+---
+
+- name: Install Required Packages
+  ansible.builtin.apt:
+    pkg:
+      - build-essential
+      - libtool
+      - libtool-bin
+      - python
+      - python3
+
+- name: Hold A Specific Kernel Image Version
+  ansible.builtin.dpkg_selections:
+    name: "linux-image-{{ linux_kernel_image_version }}"
+    selection: hold
+
+- name: Install Desired Kernel Image and Its Headers
+  ansible.builtin.apt:
+    pkg:
+      - 'linux-image-{{ linux_kernel_image_version }}'
+      - 'linux-headers-{{ linux_kernel_image_version }}'
+      - 'linux-image-extra-{{ linux_kernel_image_version }}'
+    state: present
+    update_cache: true
+
+- name: Print Kernel Fact
+  ansible.builtin.debug:
+    msg: "{{ ansible_facts['kernel'] }}"
+
+- name: Print Kernel Facts 2
+  ansible.builtin.debug:
+    msg: "{{ ansible_facts['kernel_version'] }}"
+
+- name: Read GRUB Config for Kernel Version Upgrade
+  slurp:
+    src: /boot/grub/grub.cfg
+  register: grub_config
+
+- name: Show GRUB Config for Kernel Version Upgrade
+  debug:
+    msg: "{{ grub_config['content'] | b64decode }}"
+
+- set_fact:
+    kernel_token: "{{ grub_config['content'] | b64decode | regex_findall('submenu .Advanced options for Ubuntu. .menuentry_id_option .gnulinux-advanced-(.{36})') | first }}"
+
+- name: Show GRUB_DEFAULT Config
+  debug:
+    msg: 'GRUB_DEFAULT=gnulinux-advanced-{{ kernel_token }}>gnulinux-{{ linux_kernel_image_version }}-advanced-{{ kernel_token }}'
+
+- name: GRUB Default Entry 
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_DEFAULT='
+    line: 'GRUB_DEFAULT=gnulinux-advanced-{{ kernel_token }}>gnulinux-{{ linux_kernel_image_version }}-advanced-{{ kernel_token }}'
+
+- name: Run update-grub
+  shell: update-grub
+
+- name: Reboot the machine
+  ansible.builtin.reboot:
+
+- name: Read GRUB Config for Disabling KASLR
+  slurp:
+    src: /etc/default/grub
+  register: grub_config
+
+- name: Show GRUB Config for for Disabling KASLR
+  debug:
+    msg: "{{ grub_config['content'] | b64decode }}"
+
+- set_fact:
+    linux_cmdline_default: "{{ grub_config['content'] | b64decode | regex_findall('GRUB_CMDLINE_LINUX_DEFAULT=\"(.*)\"') | first }}"
+
+- set_fact:
+    new_linux_cmdline_default: '{{linux_cmdline_default}},nokaslr'
+    when: linux_cmdline_default != ""
+
+- set_fact:
+    new_linux_cmdline_default: 'nokaslr'
+    when: linux_cmdline_default == ""
+
+- name: Set GRUB_CMDLINE_LINUX_DEFAULT
+  ansible.builtin.lineinfile:
+    path: /etc/default/grub
+    regexp: '^GRUB_CMDLINE_LINUX_DEFAULT='
+    line: 'GRUB_CMDLINE_LINUX_DEFAULT="{{new_linux_cmdline_default}}"'
+
+- name: Shell Update the GRUB
+  shell: grub-mkconfig -o /boot/grub/grub.cfg
+
+- name: Reboot the machine
+  ansible.builtin.reboot:
+
+- name: Download and Build Ethernet Driver
+  ansible.builtin.tempfile:
+    state: directory
+  register: ethernet_driver_directory
+
+- name: Download Ethernet Driver
+  ansible.builtin.unarchive:
+    src: "{{ ethernet_driver_url }}/{{ ethernet_driver_name_and_version }}.tar.gz"
+    dest: "{{ ethernet_driver_directory.path }}"
+    remote_src: true
+
+- name: Build Ethernet Driver
+  ansible.builtin.make:
+    chdir: '{{ ethernet_driver_directory.path }}/{{ ethernet_driver_name_and_version }}/src/'
+    target: default
+
+- name: Install Existing Ethernet Driver
+  ansible.builtin.make:
+    chdir: '{{ ethernet_driver_directory.path }}/{{ ethernet_driver_name_and_version }}/src/'
+    target: install
+
+- name: Clean Up the Build Directory
+  file:
+    path: "{{ ethernet_driver_directory.path }}"
+    state: absent
+
+- name: Reboot the machine
+  ansible.builtin.reboot:
+

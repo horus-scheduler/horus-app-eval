@@ -1,0 +1,15 @@
+---
+- name: Reboot the machine
+  ansible.builtin.reboot:
+
+- name: Fetch App Evaluation Repository
+  ansible.builtin.git:
+    repo: '{{ evaluation_repository_url }}'
+    dest: '{{ evaluation_repository_directory }}'
+    force: true
+
+- set_fact: 
+    shinjuku_rocksdb_source_directory: '{{evaluation_repository_directory}}/server_code/shinjuku-rocksdb'
+
+- set_fact:
+    shinjuku_rocksdb_deps_directory: '{{shinjuku_rocksdb_source_directory}}/deps'
