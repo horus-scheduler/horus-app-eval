@@ -11,3 +11,4 @@
 *.o
 *.so
 ./config.py
+ansible-setup/vault-password-file

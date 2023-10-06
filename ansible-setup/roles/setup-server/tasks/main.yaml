@@ -1,0 +1,7 @@
+---
+- name: Reboot the machine
+  ansible.builtin.reboot:
+
+- include: fetch-repositories.yaml
+
+- include: build-deps.yaml

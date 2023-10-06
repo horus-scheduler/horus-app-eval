@@ -1,0 +1,33 @@
+---
+
+- name: Fetch App Evaluation Repository
+  ansible.builtin.git:
+    repo: '{{ evaluation_repository_url }}'
+    dest: '{{ evaluation_repository_directory }}'
+    force: true
+
+- name: Fetch Dependency Repository DPDK
+  ansible.builtin.git:
+    repo: git://dpdk.org/dpdk
+    dest: '{{ shinjuku_rocksdb_deps_directory }}/dpdk'
+    version: '{{ dpdk_tag }}'
+
+- name: Fetch Dependency Repository PCIDMA
+  ansible.builtin.git:
+    repo: https://github.com/ix-project/pcidma.git
+    dest: '{{ shinjuku_rocksdb_deps_directory }}/pcidma'
+    version: '{{ pcidma_tag }}'
+    force: true
+
+- name: Fetch Dependency Repository Dune
+  ansible.builtin.git:
+    repo: https://github.com/kkaffes/dune.git
+    dest: '{{ shinjuku_rocksdb_deps_directory }}/dune'
+    version: '{{ dune_tag }}'
+    force: true
+
+- name: Fetch Dependency Repository RocksDB
+  ansible.builtin.git:
+    repo: https://github.com/facebook/rocksdb
+    dest: '{{ shinjuku_rocksdb_deps_directory }}/rocksdb'
+    version: '{{ rocksdb_tag }}'

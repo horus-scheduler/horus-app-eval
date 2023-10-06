@@ -1,0 +1,15 @@
+---
+
+- name: Setup common configuration and provision to all clients and servers
+  hosts: all
+  remote_user: '{{remote_user}}'
+  become: true
+  roles:
+    - setup-common
+
+- name: Setup Server Application
+  hosts: servers
+  remote_user: '{{remote_user}}'
+  become: true
+  roles:
+    - setup-server
