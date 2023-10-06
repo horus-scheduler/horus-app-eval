@@ -226,15 +226,15 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
 	resp.client_id = req->client_id;
 	resp.req_id = req->req_id;
     uint16_t new_qlen;
-    // SAQR: Set the latest worker qlen of the worker core in header field
+    // HORUS: Set the latest worker qlen of the worker core in header field
     new_qlen = queue_length[cpu_nr_] - 1;
     resp.qlen = new_qlen;
 
-    // SAQR: Sending reply back to the client:
+    // HORUS: Sending reply back to the client:
     resp.src_id = (req->dst_id);
     resp.dst_id = (req->client_id);
     
-    // SAQR: Leaf does not have this worker in its idle list and it became idle;
+    // HORUS: Leaf does not have this worker in its idle list and it became idle;
     // use PKT_TYPE_TASK_DONE_IDLE so that leaf add the worker to idle list. 
     if (new_qlen == 0 && (worker_state[cpu_nr_] > 0)) { 
         resp.pkt_type = PKT_TYPE_TASK_DONE_IDLE; 
@@ -258,7 +258,7 @@ static void generic_work(uint32_t msw, uint32_t lsw, uint32_t msw_id,
     };
 
     resp.qlen = SWAP_UINT16(resp.qlen); 
-    ret = udp_send_one((void *)&resp, sizeof(struct message), &new_id); // SAQR: Send reply
+    ret = udp_send_one((void *)&resp, sizeof(struct message), &new_id); // HORUS: Send reply
     if (ret)
         log_warn("udp_send failed with error %d\n", ret);
 
@@ -297,7 +297,7 @@ static inline void init_worker(void)
 {
         cpu_nr_ = percpu_get(cpu_nr) - 2;
         worker_responses[cpu_nr_].flag = PROCESSED;
-        worker_state[cpu_nr_] = 0; // SAQR: Initial state of all workers are 0 (in idle list of leaf)
+        worker_state[cpu_nr_] = 0; // HORUS: Initial state of all workers are 0 (in idle list of leaf)
         if (cpu_nr_ == 0) {
             // Initialize search app requirements
             load_docs();

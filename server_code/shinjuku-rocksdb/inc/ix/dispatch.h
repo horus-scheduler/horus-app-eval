@@ -89,8 +89,8 @@ uint32_t max_queue_wait;
 volatile uint32_t queue_length[CFG_MAX_PORTS];
 
 /*
- * SAQR: def
- * Saqr packet header strcture defined here as well as the application specific fields (e.g client_id, runNs, etc.)
+ * HORUS: def
+ * Horus packet header strcture defined here as well as the application specific fields (e.g client_id, runNs, etc.)
  * runNs: Defines the type of task to be executed (e.g GET, SCAN) this behaviour is
    implemented in generic work function in worker.c
  * genNs: Timestamp of the generated task by the client (only used for measuring response time)
@@ -177,7 +177,7 @@ struct fini_request_queue {
 struct fini_request_queue frqueue;
 
 /* 
- * SAQR: In worker_state we maintain the idleness view about workers in leaf worker recived a pkt with qlen==1, it means
+ * HORUS: In worker_state we maintain the idleness view about workers in leaf worker recived a pkt with qlen==1, it means
    that state in switch is now busy (just removed from idle list). So next time it becomes idle it sends TASK_DONE_IDLE 
    so leaf adds the worker to the idle list.
  */
@@ -310,7 +310,7 @@ static inline int naive_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
                                      uint8_t *category, uint64_t *timestamp, uint8_t core_id)
 {
         /* 
-         * SAQR
+         * HORUS
          * "type" param previously used by Shinjuku to put different task types in dedicated queues 
          * We use the same idea for isolating task queues of different workers
          * dequeue from the worker queue (type param here indicates the queue number)
@@ -357,7 +357,7 @@ static inline int smart_tskq_dequeue(struct task_queue * tq, void ** rnbl_ptr,
 
 /*
  * @parham: Parses the packet headers: eth, ip, udp.
- * modified to work with Saqr headers and support core-granular scheduling (schedulers select a worker for task not server)
+ * modified to work with Horus headers and support core-granular scheduling (schedulers select a worker for task not server)
 */
 static inline struct request * rq_update(struct request_queue * rq, struct mbuf * pkt, uint8_t *core_id, bool *place_to_queue)
 {
@@ -376,7 +376,7 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
 
     uint8_t pkt_type = msg->pkt_type;
     /* 
-     * SAQR: Line below contains decision type tag (0|1) which indicates that leaf selected this worker based on 
+     * HORUS: Line below contains decision type tag (0|1) which indicates that leaf selected this worker based on 
       Idle selection (1) or not (0).
     */
     uint16_t type = SWAP_UINT16(msg->qlen);
@@ -387,7 +387,7 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
     uint32_t pkts_length = msg->pkts_length / sizeof(struct message);
     if (pkts_length == 0)
         pkts_length = 1; // Minimum 1 packet per task
-    // SAQR: To make it consistent with shinjuku conf, worker IDs start from 1 (in switch we use 0 based index)
+    // HORUS: To make it consistent with shinjuku conf, worker IDs start from 1 (in switch we use 0 based index)
     uint16_t dst_id = SWAP_UINT16(msg->dst_id) + 1; 
 
     //log_info("\npkt_type: %u, cluster_id: %u, src_id: %u, dst_id: %u, seq_num: %u, client_id: %u, req_id: %u, pkts_length: %u, queue_len: %u\n", type, cluster_id, msg->src_id, dst_id, seq_num, client_id, req_id, pkts_length, msg->qlen);
@@ -408,7 +408,7 @@ static inline struct request * rq_update(struct request_queue * rq, struct mbuf 
     }
     
     /* 
-     * SAQR: Here we find out the physical core based on the shinjuku configuration and info in pkt:
+     * HORUS: Here we find out the physical core based on the shinjuku configuration and info in pkt:
      * The packet dst_id contains the ID of worker. 
      * In shinjuku.conf We use the *port=[]* to indicate worker IDs each of which maps to one of the CPUs 
      * Here we check and match the dst_id with the worker ID and use that index to set core_id. 

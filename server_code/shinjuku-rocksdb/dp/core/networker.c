@@ -171,7 +171,7 @@ void do_networking(void)
 
 		for (i = 0; i < num_recv; i++)
 		{
-			// @SAQR: pass core_id by ref so when parsing Saqr headers in rq_update, it will fill it based on dst_id
+			// @HORUS: pass core_id by ref so when parsing Horus headers in rq_update, it will fill it based on dst_id
 			struct request *req = rq_update(&rqueue, recv_mbufs[i], &core_id, &place_in_worker_queue);
 			if (req)
 			{

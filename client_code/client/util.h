@@ -7,7 +7,7 @@
 
 /*
  * constants
- * SAQR: Packet types defined here:
+ * HORUS: Packet types defined here:
  */
 
 #define PKT_TYPE_NEW_TASK 0
@@ -221,7 +221,7 @@ void free_trimodal_dist(TrimodalDist *trimodal_dist) {
 }
 
 /*
- * SAQR: Header format and packet structure defined here.
+ * HORUS: Header format and packet structure defined here.
 */
 typedef struct Message_ {
   uint8_t pkt_type;
@@ -230,7 +230,7 @@ typedef struct Message_ {
   uint16_t dst_id;
   uint16_t qlen;
   uint16_t seq_num; // For multi-packet requests
-  // SAQR: Switch scheduler does not care about the fields below (needed by server scheduler)
+  // HORUS: Switch scheduler does not care about the fields below (needed by server scheduler)
   uint16_t client_id;
   uint32_t req_id;
   uint32_t pkts_length;
@@ -240,7 +240,7 @@ typedef struct Message_ {
 } __attribute__((__packed__)) Message;
 
 /*
- * SAQR: struct to hold the retranmission data (original packet + send meta data)
+ * HORUS: struct to hold the retranmission data (original packet + send meta data)
 */
 typedef struct rtm_object_ { 
   uint64_t last_sent_tstamp;

@@ -34,11 +34,11 @@
 
 
 /*
- * SAQR: Defines the ID of spine scheduler (each scheduler has a unique static ID),
+ * HORUS: Defines the ID of spine scheduler (each scheduler has a unique static ID),
   should be the same as ID set in p4 code for spine.
 */
 #define SPINE_SCHEDULER_ID 100
-// SAQR: Defines ID of this client (each client has a unique ID), so that reply packet is forwarded correctly to the 
+// HORUS: Defines ID of this client (each client has a unique ID), so that reply packet is forwarded correctly to the 
 // client that initiated the request. MAC address and this ID are configured in controller of switches.
 #define CLIENT_ID 110
 
@@ -70,7 +70,7 @@ char ip_server[][32] = {
     "10.1.0.7", "10.1.0.8", "10.1.0.9", "10.1.0.10", "10.1.0.11", "10.1.0.12",
 };
 
-// SAQR: Example of reserved port used for identifying Saqr headers by the switches (dst_port)
+// HORUS: Example of reserved port used for identifying Horus headers by the switches (dst_port)
 uint16_t src_port = 1234;
 uint16_t dst_port = 1234;
 
@@ -273,18 +273,18 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   udp->src_port = htons(src_port + port_offset);
   udp->dst_port = htons(dst_port + port_offset);
 
-  req->pkt_type = PKT_TYPE_NEW_TASK; // SAQR: Packet type for a task to be scheduled
-  req->cluster_id = 0 << 8; // SAQR: In our testbed experiments we assume workers are on cluster_id=0
+  req->pkt_type = PKT_TYPE_NEW_TASK; // HORUS: Packet type for a task to be scheduled
+  req->cluster_id = 0 << 8; // HORUS: In our testbed experiments we assume workers are on cluster_id=0
   
   /* 
-   * SAQR: Arbitrary source (different clients use different codes)
+   * HORUS: Arbitrary source (different clients use different codes)
   */
   req->src_id = 7; 
   req->dst_id = SPINE_SCHEDULER_ID << 8;
   
   req->qlen = 0;
   
-  // SAQR: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
+  // HORUS: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
   req->client_id = (CLIENT_ID<<8);
   
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];

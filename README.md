@@ -1,9 +1,9 @@
 
 
-This repository contains the code for programs that run on end-hosts for Saqr in-network scheduling experiments.
+This repository contains the code for programs that run on end-hosts for "Horus: Granular In-Network Task Scheduler for Cloud Datacenters".
 The code is based on [Racksched repo](https://github.com/netx-repo/RackSched) with modifications based on our network protocols and queue model. 
 
-The modified parts are commented with tag *SAQR* in the source code.
+The modified parts are commented with tag *HORUS* in the source code.
 
 - *server_code* folder contains the code that runs on worker machines that serve the tasks.
 - *client_code* folder contains the code that runs on clients, generates the requests, sends them to network and captures the replies from workers.
@@ -13,8 +13,8 @@ This is specific to our current testbed. Each machine involved in the experiment
 
 * The deploy key is located in `/local-scratch/.ssh/`
 * The identity file is configured in `/home/<user>/.ssh/config` (LATER: needs to be in `/local-scratch/.ssh`)
-* To clone a repo, use the following command: `git clone git@github.com-repo-saqr-app-eval:horus-scheduler/saqr-app-eval.git`
-* The current location of this repo is `/local-scratch/saqr-app-eval`
+* To clone a repo, use the following command: `git clone git@github.com-repo-horus-app-eval:horus-scheduler/horus-app-eval.git`
+* The current location of this repo is `/local-scratch/horus-app-eval`
 
 # Setting Up Nodes with Ansible
 
@@ -194,7 +194,7 @@ The figure below shows the setup and assgined worker IDs  for the Skewed worker 
 
 # Running Experiments
 ### Run the switch program
-The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/parhamyassini/saqr-p4). 
+The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/parhamyassini/horus-p4). 
 
 ### Run the Workers
 1.  Make sure that shinjuku.conf is correct according to previous part of the instructions. 
@@ -236,11 +236,11 @@ The rest of args are handled by our code:
 
 * ```-n```: Experiment **N**ame; Type: String;
 
-	String attached to the result file name to distinguish the different 	expeirments. E.g. "rs_h" or "saqr".
+	String attached to the result file name to distinguish the different 	expeirments. E.g. "rs_h" or "horus".
 
 Example:
 ```
-sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n saqr
+sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n horus
 ```
 
 #### Running multiple clients
@@ -266,7 +266,7 @@ For each experiment (each load point), we run the experiment for ~15sec and stop
 > Note: The client program generates requests and sends them (TX loop), and captures the  the reply/result for tasks (RX loop); it compares the current time with the request generation time to calculate the total response time. We also attach the qlen of worker that sent the reply in the packet and store that result in RX loop as well.
 
 The result for each experiment will be saved in the following format in the ```results/``` directory: ```"output"_"experiment-name"_"task-distribution-name"_"rate"```. 
-For example, running saqr experiment at rate for 90%GET-10%SCAN (db_bimodal) and at 30000 RPS rate gives: ```output_saqr_db_port_bimodal_30000```.
+For example, running horus experiment at rate for 90%GET-10%SCAN (db_bimodal) and at 30000 RPS rate gives: ```output_horus_db_port_bimodal_30000```.
 
 The main output file contains response time for every task in nanoseconds. In addition, client generates the following outputs:
 * ```<output>.long```: response ns for long tasks only (SCAN)
@@ -277,15 +277,15 @@ The main output file contains response time for every task in nanoseconds. In ad
 ### Collecting the overhead results
 The results for the msg rate and processing overheads could be collected directly from the switch controller python script which reads the register values (internal state of switch). 
 
-The details can be found in [this repo](https://github.com/parhamyassini/saqr-p4). 
+The details can be found in [this repo](https://github.com/parhamyassini/horus-p4). 
 
 > Note that we need to record the number of tasks and task rate for each experiment form client outputs in addition to the switch controller outputs. We use the total number of tasks (output of client) and the task rate (e.g., 30KRPS) to calculate the exact experiment duration. Then, we will use the total number of msgs to calculate the *rate* (#msgs/duration(s)).
 
 ### Analyze/plot the results
 > The python script ```parselats.py``` is useful for quickly getting the 99th percentile mean and median from the response times. It gets one argument which is the file to be anlayzed. Example:
-```python parselats.py ./results/output_saqr_db_port_bimodal_90000```
+```python parselats.py ./results/output_horus_db_port_bimodal_90000```
 
-The results for response times (ones used in the paper) are stored on the 2TB SSD drive under ```./saqr-result/testbed``` folder. 
+The results for response times (ones used in the paper) are stored on the 2TB SSD drive under ```./horus-result/testbed``` folder. 
 The response time metrics are plotted based on the output files generated by client script and the overhead metrics (e.g #resubmissions, #msgs, and etc.) are summerized in the python code as arrays. Also, the  load steps (x-axis ticks) depends on workload and placement these are hardcoded in the script based on our experiments.
 
 The python script ```plot_results.py``` is the one used for plotting the testbed results in the paper. 

@@ -23,7 +23,7 @@ gateway_addr="10.1.0.1"
 ## Initially shinjuku used the ports for diffrentiating known task types (short, long) 
 ## to put them in different queues. We use the same feature forisolating the workers running on the server.
 
-## SAQR: Add the worker IDs that are running on the server. The dst_id in the headers match these worker ID values.  
+## HORUS: Add the worker IDs that are running on the server. The dst_id in the headers match these worker ID values.  
 # Balanced Setup
 port=[33, 34, 35, 36, 37, 38, 39, 40]
 

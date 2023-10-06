@@ -95,11 +95,11 @@ class Experiment:
         self.set_load_points()
         if plot_overheads:
             self.set_overhead_results()
-            self.policies = ['saqr', 'rs_rs'] # No additional messages for RS-R
-            self.algorithm_names = ['Saqr', 'RS-H']
+            self.policies = ['horus', 'rs_rs'] # No additional messages for RS-R
+            self.algorithm_names = ['Horus', 'RS-H']
         else:
-            self.policies = ['saqr', 'rs_rs', 'rs_rand']
-            self.algorithm_names = ['Saqr', 'RS-H', 'RS-R']
+            self.policies = ['horus', 'rs_rs', 'rs_rand']
+            self.algorithm_names = ['Horus', 'RS-H', 'RS-R']
 
     def set_load_points(self): # The loads (x-axis) in our experiments
         if self.setup == 'b': # Balanced setup
@@ -119,18 +119,18 @@ class Experiment:
                 self.loads_msg_exp = [10000, 30000, 50000, 70000, 90000]
                 self.task_count = [102560, 292162, 578239, 890608, 1798504, 1316483]
                 self.msg_count_rs = [102560, 292162, 578239, 890608, 1798504, 1316483]
-                self.msg_count_saqr_idle = [7568, 109750, 236612, 357465, 230162, 41352]
-                self.msg_count_saqr_load = [11946, 22799, 42700, 66640, 196039, 159389]
-                self.resub_count_saqr = [1, 3759, 19145, 48413, 201796, 186353]
+                self.msg_count_horus_idle = [7568, 109750, 236612, 357465, 230162, 41352]
+                self.msg_count_horus_load = [11946, 22799, 42700, 66640, 196039, 159389]
+                self.resub_count_horus = [1, 3759, 19145, 48413, 201796, 186353]
                 self.spine_resub_tot = [3788, 55254, 120855, 203899, 487206]
 
             elif self.task_dist == 'db_bimodal': # 90%GET-10%SCAN
                 self.loads_msg_exp = [25000, 75000, 125000, 175000, 225000, 275000, 325000]
                 self.task_count = [437475, 1108641, 1565499, 1974106, 2976202, 4084485, 4470051]
                 self.msg_count_rs = [437475, 1108641, 1565499, 1974106, 2976202, 4084485, 4470051]
-                self.msg_count_saqr_idle = [14975, 335435, 532984, 715349, 1078293, 1231909, 439239]
-                self.msg_count_saqr_load = [52809, 96648, 129061, 157343, 237235, 356568,  503847]
-                self.resub_count_saqr = [8, 17286, 55010, 109472, 214377, 414855, 636794]
+                self.msg_count_horus_idle = [14975, 335435, 532984, 715349, 1078293, 1231909, 439239]
+                self.msg_count_horus_load = [52809, 96648, 129061, 157343, 237235, 356568,  503847]
+                self.resub_count_horus = [8, 17286, 55010, 109472, 214377, 414855, 636794]
                 self.spine_resub_tot = [7502, 169936, 274184, 375707, 600731, 889632, 1089833]
 
         elif self.setup == 's': # Skewed setup
@@ -138,18 +138,18 @@ class Experiment:
                 self.loads_msg_exp = [10000, 30000, 50000, 70000, 90000, 110000, 115000]
                 self.task_count = [118992, 414376, 520829, 703844, 1349961, 1541800, 2888710]
                 self.msg_count_rs = [118992, 414376, 520829, 703844, 1349961, 1541800, 2888710]
-                self.msg_count_saqr_idle = [0, 14, 110788, 144265, 319230, 303249, 311433]
-                self.msg_count_saqr_load = [3718, 12948, 37866, 50736, 94928, 132547, 276135]
-                self.resub_count_saqr = [0, 0, 26278, 41564, 105095, 135135, 333247]
+                self.msg_count_horus_idle = [0, 14, 110788, 144265, 319230, 303249, 311433]
+                self.msg_count_horus_load = [3718, 12948, 37866, 50736, 94928, 132547, 276135]
+                self.resub_count_horus = [0, 0, 26278, 41564, 105095, 135135, 333247]
                 self.spine_resub_tot = [0, 7, 56924, 75420, 195051, 373372, 529106]
 
             elif task_dist == 'db_bimodal': # 90%GET-10%SCAN
                 self.loads_msg_exp = [50000, 150000, 250000, 350000, 425000]
                 self.task_count = [698139, 1704212, 2905707, 7187813, 4965224]
                 self.msg_count_rs = [698139, 1704212,  2905707, 7187813, 4965224]
-                self.msg_count_saqr_idle = [0, 310429,  534967, 1783106, 485409]
-                self.msg_count_saqr_load = [22168, 125340, 225171, 605849, 471860]
-                self.resub_count_saqr = [0, 85193, 202520, 636317, 644160]
+                self.msg_count_horus_idle = [0, 310429,  534967, 1783106, 485409]
+                self.msg_count_horus_load = [22168, 125340, 225171, 605849, 471860]
+                self.resub_count_horus = [0, 85193, 202520, 636317, 644160]
                 self.spine_resub_tot = [0, 164558, 340858, 1433620, 744684]
 
 
@@ -333,8 +333,8 @@ def plot_msg_rate(experiment, logarithmic=True):
         y_axis = []
         for load_idx, load in enumerate(loads_msg_exp):
             exp_duration_s = float(experiment.task_count[load_idx])/load # Duration of experiment in seconds
-            if policy == 'saqr':
-                total_msgs = experiment.msg_count_saqr_load[load_idx] + experiment.msg_count_saqr_idle[load_idx]
+            if policy == 'horus':
+                total_msgs = experiment.msg_count_horus_load[load_idx] + experiment.msg_count_horus_idle[load_idx]
             else:
                 total_msgs = experiment.msg_count_rs[load_idx]
             y_axis.append(total_msgs/exp_duration_s)
@@ -391,7 +391,7 @@ def plot_resub_rate(experiment):
     y_axis = []
     for load_idx, load in enumerate(loads_msg_exp):
         #exp_duration_s = float(task_count[load_idx])/load # Duration of experiment in seconds
-        total_resub = experiment.resub_count_saqr[load_idx]    
+        total_resub = experiment.resub_count_horus[load_idx]    
         y_axis.append((total_resub/experiment.task_count[load_idx])*100)
     
     print("Resubmit Rate:")
@@ -437,7 +437,7 @@ def plot_proc_overherad(experiment):
     x_axis = [load/1000 for load in loads_msg_exp]
     ind = np.arange(len(x_axis))
     fig, ax = plt.subplots()
-    policy = 'saqr'
+    policy = 'horus'
     width=0.4
     y_axis_task_resub = []
     y_axis_state_update = []
@@ -445,9 +445,9 @@ def plot_proc_overherad(experiment):
     y_axis_rs_overhead=[]
     for load_idx, load in enumerate(loads_msg_exp):
         exp_duration_s = float(experiment.task_count[load_idx])/load # Duration of experiment in seconds
-        total_resub = experiment.resub_count_saqr[load_idx]
-        if policy == 'saqr':
-            total_msgs = experiment.msg_count_saqr_load[load_idx] + experiment.msg_count_saqr_idle[load_idx]
+        total_resub = experiment.resub_count_horus[load_idx]
+        if policy == 'horus':
+            total_msgs = experiment.msg_count_horus_load[load_idx] + experiment.msg_count_horus_idle[load_idx]
         y_axis_task_resub.append((total_resub/exp_duration_s))
         y_axis_state_update.append(total_msgs/exp_duration_s)
         y_axis_spine_resub.append(experiment.spine_resub_tot[load_idx]/exp_duration_s)
@@ -463,7 +463,7 @@ def plot_proc_overherad(experiment):
     plt.bar(ind + width, y_axis_rs_overhead, width=width, color=color_pallete[1], label='Update Msgs')
     print("RS:")
     print(y_axis_rs_overhead)
-    print("Saqr:")
+    print("Horus:")
     print([y_axis_resub_tot + y_axis_state_update for y_axis_resub_tot, y_axis_state_update in zip(y_axis_resub_tot, y_axis_state_update)])
     ax.set_xlabel('Load (KRPS)')
     ax.set_ylabel('#Pkts/s')
@@ -480,7 +480,7 @@ def plot_proc_overherad(experiment):
     # plt.rcParams['legend.handlelength'] = 1
     # plt.rcParams['legend.numpoints'] = 1
     handles, labels = ax.get_legend_handles_labels()
-    handles.insert(0, 'Saqr')
+    handles.insert(0, 'Horus')
     labels.insert(0, '')
 
     handles.insert(3, 'RS-H')

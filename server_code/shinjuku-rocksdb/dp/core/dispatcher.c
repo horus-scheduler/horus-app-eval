@@ -56,10 +56,10 @@ static inline void handle_finished(int i)
             log_warn("No mbuf was returned from worker\n");
     context_free(worker_responses[i].rnbl);
     core_id = worker_responses[i].type;
-    // SAQR: Task finished, decrement worker queue len
+    // HORUS: Task finished, decrement worker queue len
     --queue_length[core_id];
     /* 
-     * SAQR: If the worker were previously removed from the idle list of leaf,
+     * HORUS: If the worker were previously removed from the idle list of leaf,
       when it became idle we sent an TASK_DONE_IDLE reply (in worker.c)
      * Here we change the state  
     */
@@ -100,7 +100,7 @@ static inline void dispatch_request(int i, uint64_t cur_time)
     uint64_t timestamp;
     
     /* 
-     * SAQR:
+     * HORUS:
      * Pick a task from the queue "tskq"
      * Isolating worker queues is done here
      * Pass the i (cpu core id) to the dequeue function so it can dequeue from the queue that belong to a certian worker
@@ -166,12 +166,12 @@ static inline void handle_networker(uint64_t cur_time)
                                 continue;
                         }
                         core_id = networker_pointers.types[i];
-			            // SAQR: increment worker queue len 
+			            // HORUS: increment worker queue len 
                         ++queue_length[core_id];
                         struct request *req = networker_pointers.reqs[i];
                         //log_info("WORKER %d REQTYPE %d", core_id, req->type);
                         if (req->type == WORKER_STATE_IDLE && worker_state[core_id] == 0) { 
-                            // SAQR: WORKER_STATE_IDLE means leaf selected this worker based on idle selection.
+                            // HORUS: WORKER_STATE_IDLE means leaf selected this worker based on idle selection.
                             // Therfore, leaf scheduler just poped this worker from its idle list. 
                             // We keep this state so worker will re-send an idle signal when idle (in worker.c)
                             worker_state[core_id] = 1;
