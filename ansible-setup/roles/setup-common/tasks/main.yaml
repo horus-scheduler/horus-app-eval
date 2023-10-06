@@ -90,6 +90,13 @@
 
 - name: Reboot the machine
   ansible.builtin.reboot:
+  notify: 'Update DNS'
+
+- name: Update DNS
+  template:
+    src: resolve.conf.j2
+    dest: /etc/resolv.conf
+    force: true
 
 - name: Download and Build Ethernet Driver
   ansible.builtin.tempfile:
@@ -99,7 +106,7 @@
 - name: Download Ethernet Driver
   ansible.builtin.unarchive:
     src: "{{ ethernet_driver_url }}/{{ ethernet_driver_name_and_version }}.tar.gz"
-    dest: "{{ ethernet_driver_directory.path }}"
+    dest: "{{ ethernet_driver_directory['path'] }}"
     remote_src: true
 
 - name: Build Ethernet Driver
@@ -120,3 +127,8 @@
 - name: Reboot the machine
   ansible.builtin.reboot:
 
+- name: Update DNS
+  template:
+    src: resolve.conf.j2
+    dest: /etc/resolv.conf
+    force: true
