@@ -1,0 +1,5 @@
+- name: Update DNS
+  template:
+    src: resolve.conf.j2
+    dest: /etc/resolv.conf
+    force: true

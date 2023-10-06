@@ -1,5 +1,10 @@
 ---
-
+- name: Update DNS
+  template:
+    src: resolve.conf.j2
+    dest: /etc/resolv.conf
+    force: true
+    
 - name: Fetch App Evaluation Repository
   ansible.builtin.git:
     repo: '{{ evaluation_repository_url }}'

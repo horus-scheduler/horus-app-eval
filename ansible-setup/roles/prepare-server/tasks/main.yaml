@@ -58,11 +58,6 @@
     name: dune
     state: present
 
-- name: Setup shinjuku with RocksDB
-  ansible.builtin.shell: 
-    cmd: ./setup.sh
-    chdir: '{{shinjuku_rocksdb_source_directory}}'
-
 - name: Run shinjuku RocksDB After Boot Script
   ansible.builtin.shell: 
     cmd: ./after_boot.sh
