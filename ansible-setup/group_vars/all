@@ -6,8 +6,8 @@ ansible_become_password: <vault_output>
 linux_kernel_image_version: 4.4.0-142-generic
 ethernet_driver_url: https://downloadmirror.intel.com/15817/eng
 ethernet_driver_name_and_version: e1000e-3.8.4
-evaluation_repository_url: https://github.com/horus-scheduler/saqr-app-eval.git
-evaluation_repository_directory: /home/saeed/saqr-app-eval
+evaluation_repository_url: https://github.com/horus-scheduler/horus-app-eval.git
+evaluation_repository_directory: /home/saeed/horus-app-eval
 
 nameservers:
 - 142.58.233.11
