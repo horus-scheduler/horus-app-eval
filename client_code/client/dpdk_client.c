@@ -12,6 +12,10 @@
 #include <endian.h>
 #include <stdbool.h>
 #include <unistd.h> 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdatomic.h>
 
 #include <rte_cycles.h>
 #include <rte_debug.h>
@@ -32,22 +36,12 @@
 #include "util.h"
 #include "set.h"
 
-
-/*
- * HORUS: Defines the ID of spine scheduler (each scheduler has a unique static ID),
-  should be the same as ID set in p4 code for spine.
-*/
-#define SPINE_SCHEDULER_ID 100
-// HORUS: Defines ID of this client (each client has a unique ID), so that reply packet is forwarded correctly to the 
-// client that initiated the request. MAC address and this ID are configured in controller of switches.
-#define CLIENT_ID 110
-
 #define NUM_PKTS 1
 #define MAX_RESULT_SIZE 16777216UL  // 2^24
 
-#define APP_BENCHMARK 0
-#define APP_KEYVAL 1
-#define APP_SEARCH 2
+typedef enum  {
+  AppBenchmark, AppRocksdb, AppTpcc, AppSearch
+} AppType_t;
 
 #define SEARCH_MIN_WORD 1
 #define SEARCH_MAX_WORD 16
@@ -70,7 +64,7 @@ char ip_server[][32] = {
     "10.1.0.7", "10.1.0.8", "10.1.0.9", "10.1.0.10", "10.1.0.11", "10.1.0.12",
 };
 
-// HORUS: Example of reserved port used for identifying Horus headers by the switches (dst_port)
+// Horus: Example of reserved port used for identifying Horus headers by the switches (dst_port)
 uint16_t src_port = 1234;
 uint16_t dst_port = 1234;
 
@@ -79,23 +73,24 @@ int is_latency_client = 0;   // 0 means batch client, 1 means latency client
 uint32_t client_index = 11;  // default client: netx12
 uint32_t server_index = 0;   // default server: netx1
 uint32_t qps = 20000;       // default qps: 100000
+uint32_t additional_qps = 0;
 char *dist_type = "fixed";   // default dist: fixed
-uint32_t scale_factor = 1;   // 1 means the mean is 1us; mean = 1 * scale_factor
+uint32_t scale_factor = 4000;   // 1 means the mean is 1us; mean = 1 * scale_factor
 uint32_t is_rocksdb = 0; // 1 means testing with rocksdb, 0 means testing with synthetic workload
 uint32_t dynamic_step_num  = 0; // Number of steps to increase load dynamically, 0 means static load based on initial qps
-uint32_t dynamic_step_size = 20; // Defines the relative increase (%) in qps at each step of load increase. The increase will be linear (+= X% initial_qps)
+uint32_t dynamic_step_list [100]; // Stores the qps at each step of dynamic load.
 uint32_t dynamic_step_interval_ms = 2000; // Time interval between each increase step (ms)
 char *run_name;
+atomic_int core_count = 0;
 /********* Packet related *********/
 uint32_t req_id = 0;
-int max_req_id = 65536;
+int max_req_id = (1<<25)-1;
 uint32_t req_id_core[8] = {0};
-
 /********* Results *********/
 uint64_t pkt_sent = 0;
 uint64_t pkt_resent = 0;
 uint64_t pkt_recv = 0;
-LatencyResults latency_results = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0};
+LatencyResults latency_results = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0};
 
 SearchResults search_results = {NULL, NULL, NULL, NULL, NULL};
 
@@ -114,7 +109,7 @@ static void dump_stats_to_file() {
   char output_name_base[100];
   char output_name[200];
   
-  sprintf(output_name_base, "./results/output_%s_%s_%u", run_name, dist_type, qps);
+  sprintf(output_name_base, "./results/output_%s_%s_%u", run_name, dist_type, ((core_count/2) * qps) + additional_qps);
   FILE *output_ptr = fopen(output_name_base, "wb");
   
   sprintf(output_name, "%s.reply_ns", output_name_base);
@@ -152,11 +147,16 @@ static void dump_stats_to_file() {
   sprintf(output_name, "%s.search_doc_id", output_name_base);
   FILE *search_id_ptr = fopen(output_name, "wb");
 
+  memset(output_name,0, strlen(output_name));
+  sprintf(output_name, "%s.gen_us", output_name_base);
+  FILE *gen_us_ptr = fopen(output_name, "wb");
+
   for (int i = 0; i < latency_results.count; i++) {
     fprintf(queue_length_ptr, "%u\n",latency_results.queue_lengths[i][0]);
     fprintf(output_ptr, "%lu\n", latency_results.sjrn_times[i]);
     fprintf(output_reply_ns_ptr, "%lu\n", latency_results.reply_run_ns[i]);
     fprintf(ratio_ptr, "%lu\n", latency_results.work_ratios[i]);
+    fprintf(gen_us_ptr, "%lu\n", latency_results.gen_us[i]);
     // Search results
     fprintf(search_res_ptr, "%lu\n", search_results.doc_cnt[i]);
     fprintf(search_id_ptr, "%lu\n", search_results.doc_id1[i]);
@@ -174,7 +174,7 @@ static void dump_stats_to_file() {
       fprintf(ratio_ptr_long, "%lu\n", latency_results.work_ratios_long[i]);
     }
   }
-
+  fclose(gen_us_ptr);
   fclose(search_res_ptr);
   fclose(search_id_ptr);
   fclose(queue_length_ptr);
@@ -200,6 +200,7 @@ static void sigint_handler(int sig) {
     dump_stats_to_file();
   }
   rte_free(latency_results.sjrn_times);
+  rte_free(latency_results.gen_us);
   rte_free(latency_results.work_ratios);
   rte_free(latency_results.queue_lengths);
   rte_free(latency_results.sjrn_times_short);
@@ -228,7 +229,7 @@ static void insert_to_rtm_list (Message *req, uint64_t tstamp, unsigned int tx_c
 static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
                             uint16_t seq_num, uint32_t pkts_length,
                             uint64_t gen_ns, uint64_t run_ns, int port_offset,
-                            int app_type,
+                            AppType_t app_type,
                             uint64_t app_data[]) {
   
   assert(mbuf != NULL);
@@ -273,19 +274,24 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   udp->src_port = htons(src_port + port_offset);
   udp->dst_port = htons(dst_port + port_offset);
 
-  req->pkt_type = PKT_TYPE_NEW_TASK; // HORUS: Packet type for a task to be scheduled
-  req->cluster_id = 0 << 8; // HORUS: In our testbed experiments we assume workers are on cluster_id=0
+  req->pkt_type = PKT_TYPE_NEW_TASK; // Horus: Packet type for a task to be scheduled
+  req->cluster_id = 0 << 8; // Horus: In our testbed experiments we assume workers are on cluster_id=0
   
   /* 
-   * HORUS: Arbitrary source (different clients use different codes)
+   * Horus: Arbitrary source (different clients use different codes)
   */
-  req->src_id = 7; 
+  req->src_id = 0; 
   req->dst_id = SPINE_SCHEDULER_ID << 8;
   
   req->qlen = 0;
   
-  // HORUS: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
-  req->client_id = (CLIENT_ID<<8);
+  // Horus: Client ID is used for routing the reply packets to correct client machine (configured by switch controller)
+  if (app_type == AppRocksdb) {
+    req->client_id = (CLIENT_ID_ROCKSDB<<8);  
+  } else if (app_type == AppTpcc) {
+    req->client_id = (CLIENT_ID_TPCC<<8);  
+  }
+  
   
   req->req_id = (req->client_id << 25) + req_id_core[lcore_id];
   //printf("TXLOOP: GEN, request id: %u, gen_ns: %lu\n", req->req_id, gen_ns);
@@ -293,7 +299,7 @@ static void generate_packet(uint32_t lcore_id, struct rte_mbuf *mbuf,
   req->pkts_length = pkts_length;
   req->gen_ns = gen_ns; // INFO: Req generation time (for calculations)
   req->run_ns = run_ns; // INFO: Defines the type of task (used in worker to identify the work to be done)
-  if (app_type == APP_SEARCH) {
+  if (app_type == AppSearch) {
     int i=0;
     for (i=0; i < gen_ns; i++) {
       req->app_data[i] = app_data[i];
@@ -377,8 +383,9 @@ static void process_packet(uint32_t lcore_id, struct rte_mbuf *mbuf) {
   uint64_t reply_run_ns = rte_le_to_cpu_64(res->run_ns);
   assert(cur_ns > res->gen_ns);
   uint64_t sjrn = cur_ns - res->gen_ns;  // diff in time
-  //printf("Rx, client_id:%u, req_id:%u, gen_ns:%lu, sjrn_us:%lu\n",res->client_id, res->req_id, res->gen_ns, sjrn/1000);
+  //printf("Rx, client_id:%u, req_id:%u, run_ns:%lu, sjrn_us:%lu, differnece %ld\n",res->client_id, res->req_id, res->run_ns/1000, sjrn/1000, (sjrn - res->run_ns )/1000);
   latency_results.sjrn_times[latency_results.count] = sjrn;
+  latency_results.gen_us[latency_results.count] = res->gen_ns / 1000;
   //printf("\nresponse time: %u\n", sjrn);
   latency_results.reply_run_ns[latency_results.count] = reply_run_ns;
   //int ret = ll_remove_search(list, search_list_req_id, res->req_id);
@@ -445,7 +452,7 @@ static void fixed_tx_loop(uint32_t lcore_id, double work_ns) {
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_BENCHMARK, NULL);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppBenchmark, NULL);
       enqueue_pkt(lcore_id, mbuf);
     }
     req_id++;
@@ -461,7 +468,7 @@ static void fixed_tx_loop(uint32_t lcore_id, double work_ns) {
   free_exp_dist(dist);
 }
 
-static void exp_tx_loop(uint32_t lcore_id, double work_mu, int app_type) {
+static void exp_tx_loop(uint32_t lcore_id, double work_mu, AppType_t app_type) {
   struct lcore_configuration *lconf = &lcore_conf[lcore_id];
   printf("%lld entering exp TX loop on lcore %u\n", (long long)time(NULL),
          lcore_id);
@@ -488,7 +495,7 @@ static void exp_tx_loop(uint32_t lcore_id, double work_mu, int app_type) {
     SimpleSet set;
     set_init(&set);
     uint64_t app_data[16]; 
-    if (app_type == APP_SEARCH){
+    if (app_type == AppSearch){
       search_word_cnt = rand() % (SEARCH_MAX_WORD + 1 - SEARCH_MIN_WORD) + SEARCH_MIN_WORD;
       int i=0;
       while (set_length(&set)!= search_word_cnt) {
@@ -507,7 +514,7 @@ static void exp_tx_loop(uint32_t lcore_id, double work_mu, int app_type) {
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      if (app_type == APP_SEARCH) {
+      if (app_type == AppSearch) {
         generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, app_type, app_data);
       } else {
         generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, app_type, NULL);
@@ -557,7 +564,7 @@ static void lognormal_tx_loop(uint32_t lcore_id, double work_mu, double sigma) {
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppBenchmark, NULL);
       enqueue_pkt(lcore_id, mbuf);
     }
     req_id++;
@@ -600,7 +607,7 @@ static void bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     uint32_t pkts_length = NUM_PKTS * sizeof(Message);
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
-      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppRocksdb, NULL);
       enqueue_pkt(lcore_id, mbuf);
     }
     req_id++;
@@ -625,15 +632,17 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
          (long long)time(NULL), lcore_id);
 
   struct rte_mbuf *mbuf;
-  ExpDist *dist_list[dynamic_step_num+1]; // first distribution is for initial qps + #dynamic_step_num distributions for increased rates
-  double lambda = qps * 1e-9;
-  double mu = 1.0 / lambda;
-  for (int i = 0; i <= dynamic_step_num; i++) {
-      printf("Generating distributions step %d\n", i);
+  ExpDist *dist_list[dynamic_step_num]; // first distribution is for initial qps + #dynamic_step_num distributions for increased rates
+  double mu;
+  double lambda;
+  uint64_t start_offset_ns = 1e7; // 10 ms delay for the first gen_ns dist
+  for (int i = 0; i < dynamic_step_num; i++) {
+      printf("Initializing distributions step %d with rate %d RPS\n", i, dynamic_step_list[i]);
+      lambda = dynamic_step_list[i] * 1e-9;
+      mu = 1.0 / lambda;
       dist_list[i] = malloc(sizeof(ExpDist));
-      init_exp_dist(dist_list[i], mu);
-      lambda += (dynamic_step_size/ 100) * lambda;
-      mu = 1.0 /lambda;
+      init_exp_dist_future(dist_list[i], mu, start_offset_ns);
+      start_offset_ns += dynamic_step_interval_ms*1e6; // offset in ns
   }
   ExpDist *dist = dist_list[0];
   BimodalDist *work_dist = malloc(sizeof(BimodalDist));
@@ -641,7 +650,7 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
   uint64_t work_ns;
   init_bimodal_dist(work_dist, work_1_ns, work_2_ns, ratio);
   printf("lcore %u start sending port bimodal packets in %" PRIu32 " qps\n",
-         lcore_id, qps);
+         lcore_id, dynamic_step_list[0]);
 
   signal(SIGINT, sigint_handler);
 
@@ -657,9 +666,9 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
       if (work_ns == work_1_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppRocksdb, NULL);
       } else if (work_ns == work_2_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_KEYVAL, NULL);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppRocksdb, NULL);
       }
       enqueue_pkt(lcore_id, mbuf);
     }
@@ -674,20 +683,99 @@ static void port_bimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     send_pkt_burst(lcore_id);
     elapsed_ns = get_cur_ns() - start_ns;
     if (elapsed_ns > dynamic_step_interval_ms*1e6) {
-        if (dist_index < dynamic_step_size) {
-          printf("lcore %u increasing task rate after taskID = %d\n", lcore_id, req_id_core[lcore_id]);
+        if (dist_index < dynamic_step_num - 1) {
           dist_index ++;
+          printf("lcore %u changing task rate after taskID = %u, next rate = %d RPS\n", lcore_id, req_id_core[lcore_id], dynamic_step_list[dist_index]);
           dist = dist_list[dist_index];
         } else {
-          printf("lcore %u reached max task rate\n");
+          if (dist_index == dynamic_step_num - 1){
+            printf("lcore %u: no more changes to task rate\n",lcore_id);  
+          } 
+          dist_index ++;
         }
         start_ns = get_cur_ns();
     }
   }
-  for (int i=0; i<=dynamic_step_size; i++) {
+  for (int i=0; i < dynamic_step_num; i++) {
     free_exp_dist(dist_list[i]);  
   }
   free_bimodal_dist(work_dist);
+}
+
+static void fivemodal_tx_loop(uint32_t lcore_id, 
+  uint64_t work_1_ns, uint64_t work_2_ns, uint64_t work_3_ns, uint64_t work_4_ns, uint64_t work_5_ns,
+  double ratio_1, double ratio_2, double ratio_3, double ratio_4) {
+  struct lcore_configuration *lconf = &lcore_conf[lcore_id];
+  printf("%lld entering Five Modal TX loop on lcore %u\n",
+         (long long)time(NULL), lcore_id);
+
+  struct rte_mbuf *mbuf;
+  ExpDist *dist_list[dynamic_step_num]; // first distribution is for initial qps + #dynamic_step_num distributions for increased rates
+  double mu;
+  double lambda;
+  uint64_t start_offset_ns = 1e7; // 10 ms delay for the first gen_ns dist
+  for (int i = 0; i < dynamic_step_num; i++) {
+      printf("Initializing distributions step %d with rate %d RPS\n", i, dynamic_step_list[i]);
+      lambda = dynamic_step_list[i] * 1e-9;
+      mu = 1.0 / lambda;
+      dist_list[i] = malloc(sizeof(ExpDist));
+      init_exp_dist_future(dist_list[i], mu, start_offset_ns);
+      start_offset_ns += dynamic_step_interval_ms*1e6; // offset in ns
+  }
+  ExpDist *dist = dist_list[0];
+  FivemodalDist *work_dist = malloc(sizeof(FivemodalDist));
+  
+  uint64_t work_ns;
+  init_fivemodal_dist(work_dist, work_1_ns, work_2_ns, work_3_ns, work_4_ns, work_5_ns, ratio_1, ratio_2, ratio_3, ratio_4);
+  printf("lcore %u start sending fivemodal packets in %" PRIu32 " qps\n",
+         lcore_id, dynamic_step_list[0]);
+
+  if (lcore_id == 1)
+    signal(SIGINT, sigint_handler);
+
+  uint64_t elapsed_ns = 0;
+  uint32_t dist_index = 0;
+  uint64_t start_ns = get_cur_ns();
+  
+  while (1) {
+    work_ns = fivemodal_dist_work_ns(work_dist);
+    uint64_t gen_ns = exp_dist_next_arrival_ns(dist);
+    // printf("work_ns: %u\n", work_ns);
+    uint32_t pkts_length = NUM_PKTS * sizeof(Message);
+    for (uint8_t i = 0; i < NUM_PKTS; i++) {
+      mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
+      generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppTpcc, NULL);
+      
+      enqueue_pkt(lcore_id, mbuf);
+    }
+    req_id++;
+    if (req_id_core[lcore_id] >= max_req_id) {
+      req_id_core[lcore_id] = 0;
+    } else {
+      req_id_core[lcore_id]++;
+    }
+    while (get_cur_ns() < gen_ns)
+      ;
+    send_pkt_burst(lcore_id);
+    elapsed_ns = get_cur_ns() - start_ns;
+    if (elapsed_ns > dynamic_step_interval_ms*1e6) {
+        if (dist_index < dynamic_step_num - 1) {
+          dist_index ++;
+          printf("lcore %u changing task rate after taskID = %u, next rate = %d RPS\n", lcore_id, req_id_core[lcore_id], dynamic_step_list[dist_index]);
+          dist = dist_list[dist_index];
+        } else {
+          if (dist_index == dynamic_step_num - 1){
+            printf("lcore %u: no more changes to task rate\n",lcore_id);  
+          } 
+          dist_index ++;
+        }
+        start_ns = get_cur_ns();
+    }
+  }
+  for (int i=0; i < dynamic_step_num; i++) {
+    free_exp_dist(dist_list[i]);  
+  }
+  free_fivemodal_dist(work_dist);
 }
 
 static void port_trimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
@@ -719,11 +807,11 @@ static void port_trimodal_tx_loop(uint32_t lcore_id, uint64_t work_1_ns,
     for (uint8_t i = 0; i < NUM_PKTS; i++) {
       mbuf = rte_pktmbuf_alloc(pktmbuf_pool);
       if (work_ns == work_1_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, APP_BENCHMARK, NULL);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 0, AppBenchmark, NULL);
       } else if (work_ns == work_2_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 1, APP_BENCHMARK, NULL);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 1, AppBenchmark, NULL);
       } else if (work_ns == work_3_ns) {
-        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 2, APP_BENCHMARK, NULL);
+        generate_packet(lcore_id, mbuf, i, pkts_length, gen_ns, work_ns, 2, AppBenchmark, NULL);
       }
       enqueue_pkt(lcore_id, mbuf);
     }
@@ -745,7 +833,7 @@ static void tx_loop(uint32_t lcore_id) {
   if (strcmp(dist_type, "fixed") == 0) {
     fixed_tx_loop(lcore_id, 1000 * scale_factor);  // 1us
   } else if (strcmp(dist_type, "exp") == 0) {
-    exp_tx_loop(lcore_id, 1000 * scale_factor, APP_SEARCH);  // mu = 1us
+    exp_tx_loop(lcore_id, 1000 * scale_factor, AppSearch);  // mu = 1us
   } else if (strcmp(dist_type, "lognormal") == 0) {
     lognormal_tx_loop(lcore_id, 1000 * scale_factor,
                       10000);  // mu = 1us, sigma = 10us
@@ -763,18 +851,12 @@ static void tx_loop(uint32_t lcore_id) {
     // run_ns=0, SCAN;
     // 90%: GET, 10%: SCAN
     bimodal_tx_loop(lcore_id, 500 * scale_factor, 0 * scale_factor, 0.9);
-  } else if (strcmp(dist_type, "sim") == 0){  //@muh: added for short and long duration queries
-
-    // run_ns=0, SCAN;
-    // 90%: short duration, 10%: long duration, for 50 us and 500 ms
-    //bimodal_tx_loop(lcore_id, 50000* scale_factor, 500000000 * scale_factor, 0.9);
-    // 50%: short duration, 50%: long duration, for 50 us and 500 ms
-    bimodal_tx_loop(lcore_id, 50000* scale_factor, 500000000 * scale_factor, 0.5);
-
-
   } else if (strcmp(dist_type, "db_port_bimodal") == 0) {
     port_bimodal_tx_loop(lcore_id, 1000 * scale_factor, 0 * scale_factor, 0.5);
-  } else {
+  } else if (strcmp(dist_type, "tpc") == 0) {
+    fivemodal_tx_loop(lcore_id, 5.7 * scale_factor, 6 * scale_factor, 20*scale_factor, 88*scale_factor, 100*scale_factor, 0.44, 0.04, 0.44, 0.04);
+  }
+  else {
     rte_exit(EXIT_FAILURE, "Error: No matching distribution type found\n");
   }
 }
@@ -797,7 +879,9 @@ static void rx_loop(uint32_t lcore_id) {
       for (j = 0; j < nb_rx; j++) {
         mbuf = mbuf_burst[j];
         rte_prefetch0(rte_pktmbuf_mtod(mbuf, void *));
-        process_packet(lcore_id, mbuf);
+        if (lcore_id==0){ // Only one core process the latency others help reading from the queues to avoid backlogs
+          process_packet(lcore_id, mbuf);
+        }
         rte_pktmbuf_free(mbuf);
       }
     }
@@ -847,18 +931,23 @@ static void arbiter_loop(uint32_t lcore_id) {
   }
 }
 
-
 // main processing loop for client
 static int32_t client_loop(__attribute__((unused)) void *arg) {
   uint32_t lcore_id = rte_lcore_id();
-
+  core_count ++;
   if (is_latency_client > 0) {
     if (lcore_id == 0) {
       rx_loop(lcore_id);
     } else if (lcore_id == 1) {
       tx_loop(lcore_id);
-    } else { // arbiter loop
-      arbiter_loop(lcore_id);
+    } else if (lcore_id == 2){ 
+      tx_loop(lcore_id);
+    } else if (lcore_id ==3){
+      rx_loop(lcore_id);
+    } else if (lcore_id==4) {
+      rx_loop(lcore_id);
+    } else if (lcore_id==5){
+      tx_loop(lcore_id);
     }
   } else {
     tx_loop(lcore_id);
@@ -872,6 +961,8 @@ static void custom_init(void) {
   if (is_latency_client > 0) {
     // init huge arrays to store results
     latency_results.sjrn_times =
+        (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
+    latency_results.gen_us =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
     latency_results.sjrn_times_long =
         (uint64_t *)rte_malloc(NULL, sizeof(uint64_t) * MAX_RESULT_SIZE, 0);
@@ -906,17 +997,16 @@ static void parse_client_args_help(char *program_name) {
           "Usage: %s -l <WORKING_CORES> -- -l <IS_LATENCY_CLIENT> -c "
           "<CLIENT_IDX> -s <SERVER_ID> -d "
           "<DIST_TYPE> -q "
-          "<QPS_PER_CORE>"
+          "<QPS_PER_CORE for dynamic rates enter comma seperated values>"
           " -n <Experiment Name>"
-          " -k <Number of steps in dynamic load>"
-          " -p <Percentage load increase per step>"
           " -i <Interval (ms) between steps>\n",
           program_name);
 }
 
 static int parse_client_args(int argc, char **argv) {
   int opt, num;
-  while ((opt = getopt(argc, argv, "l:c:s:d:q:x:r:n:k:p:i:")) != -1) {
+  char *pt;
+  while ((opt = getopt(argc, argv, "l:c:s:d:q:x:r:n:p:i:a:")) != -1) {
     switch (opt) {
       case 'l':
         num = atoi(optarg);
@@ -934,8 +1024,20 @@ static int parse_client_args(int argc, char **argv) {
         dist_type = optarg;
         break;
       case 'q':
-        num = atoi(optarg);
-        qps = num;
+        pt = strtok(optarg, ",");
+        while (pt != NULL) {
+          uint32_t rate = atoi(pt);
+          dynamic_step_list[dynamic_step_num] = rate;
+          printf("Rate step [%d] = %d\n", dynamic_step_num, rate);
+          pt = strtok(NULL, ",");
+          dynamic_step_num++;
+          if (dynamic_step_num >= (sizeof(dynamic_step_list)/sizeof(dynamic_step_list[0]))) { // reached max #steps
+            printf("Reached maximum number of dynamic rate steps!\n");
+            parse_client_args_help(argv[0]);
+            return -1;
+          }
+        }
+        qps = dynamic_step_list[0];
         break;
       case 'x':
         num = atoi(optarg);
@@ -948,17 +1050,13 @@ static int parse_client_args(int argc, char **argv) {
       case 'n':
         run_name = optarg;
         break;
-      case 'p':
-        num = atoi(optarg);
-        dynamic_step_size = num;
-        break;
-      case 'k':
-        num = atoi(optarg);
-        dynamic_step_num = num;
-        break;
       case 'i':
         num = atoi(optarg);
         dynamic_step_interval_ms = num;
+        break;
+      case 'a':
+        num = atoi(optarg);
+        additional_qps = num;
         break;
       default:
         parse_client_args_help(argv[0]);
@@ -971,16 +1069,15 @@ static int parse_client_args(int argc, char **argv) {
   printf("Client (src): %s\n", ip_client[client_index]);
   printf("Server (dst): %s\n", ip_server[server_index]);
   printf("Type of distribution: %s\n", dist_type);
-  printf("QPS per core: %" PRIu32 "\n\n", qps);
+  // printf("QPS per core: %" PRIu32 "\n\n", qps);
   printf("Result save name: %s\n", run_name);
   if (dynamic_step_num > 0) {
     printf("Dynamic #Steps: %d\n", dynamic_step_num);
-    printf("Dynamic increase per step: (%%): %d\n", dynamic_step_size);
     printf("Dynamic increase interval (ms): %d\n", dynamic_step_interval_ms);
   } else {
     printf("Using static QPS load\n");
   }
-  
+  printf("\n");
   return 0;
 }
 

@@ -7,7 +7,7 @@
 
 /*
  * constants
- * HORUS: Packet types defined here:
+ * Horus: Packet types defined here:
  */
 
 #define PKT_TYPE_NEW_TASK 0
@@ -34,7 +34,20 @@
 #define IP_SRC "10.1.0.12"
 #define IP_DST "10.1.0.1"
 #define CLIENT_PORT 11234
+
+// HORUS: UDP port assumption reserved for Horus packets, should match the parser.p4 defined HORUS_PORT
 #define SERVICE_PORT 1234
+
+/*
+ * Horus: Defines the ID of spine scheduler (each scheduler has a unique static ID),
+  should be the same as ID set in p4 code for spine.
+*/
+#define SPINE_SCHEDULER_ID 100
+
+// Horus: Defines ID of this client (each client has a unique ID), so that reply packet is forwarded correctly to the 
+// client that initiated the request. MAC address and this ID are configured in controller of switches.
+#define CLIENT_ID_TPCC 150
+#define CLIENT_ID_ROCKSDB 110
 
 #define QLEN_ARR_DIMENSION 4
 #define SWAP_UINT16(x) (((x) >> 8) | ((x) << 8))
@@ -73,6 +86,7 @@ uint64_t get_cur_ns() {
 // For storing results
 typedef struct LatencyResults_ {
   uint64_t *sjrn_times;
+  uint64_t *gen_us;
   uint64_t *sjrn_times_short;
   uint64_t *sjrn_times_long;
   uint64_t *work_ratios;
@@ -102,13 +116,17 @@ typedef struct ExpDist_ {
   uint64_t cur_ns;
 } ExpDist;
 
-void init_exp_dist(ExpDist *exp_dist, double mu) {
+void init_exp_dist_future(ExpDist *exp_dist, double mu, uint64_t time_offset_ns) {
   gsl_rng_env_setup();
   const gsl_rng_type *T = gsl_rng_default;
   gsl_rng *r = gsl_rng_alloc(T);
   uint64_t cur_ns = get_cur_ns();
-  ExpDist temp_exp_dist = {r, mu, cur_ns};
+  ExpDist temp_exp_dist = {r, mu, cur_ns + time_offset_ns};
   memcpy(exp_dist, &temp_exp_dist, sizeof(ExpDist));
+}
+
+void init_exp_dist(ExpDist *exp_dist, double mu) {
+  init_exp_dist_future(exp_dist,  mu, 0);
 }
 
 uint64_t exp_dist_next_arrival_ns(ExpDist *exp_dist) {
@@ -159,6 +177,20 @@ typedef struct BimodalDist_ {
   double ratio;
 } BimodalDist;
 
+
+typedef struct FivemodalDist_ {
+  gsl_rng *r;
+  uint64_t work_1;
+  uint64_t work_2;
+  uint64_t work_3;
+  uint64_t work_4;
+  uint64_t work_5;
+  double ratio_1;
+  double ratio_2;
+  double ratio_3;
+  double ratio_4;
+} FivemodalDist;
+
 void init_bimodal_dist(BimodalDist *bimodal_dist, uint64_t work_1_ns,
                        uint64_t work_2_ns, double ratio) {
   gsl_rng_env_setup();
@@ -166,6 +198,40 @@ void init_bimodal_dist(BimodalDist *bimodal_dist, uint64_t work_1_ns,
   gsl_rng *r = gsl_rng_alloc(T);
   BimodalDist temp_bimodal_dist = {r, work_1_ns, work_2_ns, ratio};
   memcpy(bimodal_dist, &temp_bimodal_dist, sizeof(BimodalDist));
+}
+
+void init_fivemodal_dist(FivemodalDist *fivemodal_dist, 
+  uint64_t work_1_ns, uint64_t work_2_ns, uint64_t work_3_ns, uint64_t work_4_ns, uint64_t work_5_ns,
+  double ratio_1, double ratio_2, double ratio_3, double ratio_4) {
+  gsl_rng_env_setup();
+  const gsl_rng_type *T = gsl_rng_default;
+  gsl_rng *r = gsl_rng_alloc(T);
+  FivemodalDist temp_fivemodal_dist = {r, work_1_ns, work_2_ns, work_3_ns, work_4_ns, work_5_ns, ratio_1, ratio_2, ratio_3, ratio_4};
+  memcpy(fivemodal_dist, &temp_fivemodal_dist, sizeof(FivemodalDist));
+}
+
+void free_fivemodal_dist(FivemodalDist *fivemodal_dist){
+  gsl_rng_free(fivemodal_dist->r);
+  free((void *)fivemodal_dist);
+}
+
+uint64_t fivemodal_dist_work_ns(FivemodalDist *dist) {
+  double num = gsl_ran_flat(dist->r, 0.0, 1.0);
+  double ratio_upper_2 = dist->ratio_1 + dist->ratio_2;
+  double ratio_upper_3 = ratio_upper_2 + dist->ratio_3;
+  double ratio_upper_4 = ratio_upper_3 + dist->ratio_4;
+
+  if (num < dist->ratio_1) {
+    return dist->work_1;
+  } else if (num >= dist->ratio_1 && num < ratio_upper_2) {
+    return dist->work_2;
+  } else if (num >= ratio_upper_2 && num < ratio_upper_3) {
+    return dist->work_3;
+  } else if (num >= ratio_upper_3 && num < ratio_upper_4) {
+    return dist->work_4;
+  } else {
+    return dist->work_5;
+  }
 }
 
 uint64_t bimodal_dist_work_ns(BimodalDist *bimodal_dist) {
@@ -221,7 +287,7 @@ void free_trimodal_dist(TrimodalDist *trimodal_dist) {
 }
 
 /*
- * HORUS: Header format and packet structure defined here.
+ * Horus: Header format and packet structure defined here.
 */
 typedef struct Message_ {
   uint8_t pkt_type;
@@ -230,7 +296,7 @@ typedef struct Message_ {
   uint16_t dst_id;
   uint16_t qlen;
   uint16_t seq_num; // For multi-packet requests
-  // HORUS: Switch scheduler does not care about the fields below (needed by server scheduler)
+  // Horus: Switch scheduler does not care about the fields below (needed by server scheduler)
   uint16_t client_id;
   uint32_t req_id;
   uint32_t pkts_length;
@@ -240,7 +306,7 @@ typedef struct Message_ {
 } __attribute__((__packed__)) Message;
 
 /*
- * HORUS: struct to hold the retranmission data (original packet + send meta data)
+ * Horus: struct to hold the retranmission data (original packet + send meta data)
 */
 typedef struct rtm_object_ { 
   uint64_t last_sent_tstamp;
