@@ -1,6 +1,5 @@
 
-
-This repository contains the code for programs that run on end-hosts for "Horus: Granular In-Network Task Scheduler for Cloud Datacenters".
+This repository contains the code for programs that run on end-hosts for NSDI24 Paper "Horus: Granular In-Network Task Scheduler for Cloud Datacenters".
 The code is based on [Racksched repo](https://github.com/netx-repo/RackSched) with modifications based on our network protocols and queue model. 
 
 The modified parts are commented with tag *HORUS* in the source code.
@@ -194,7 +193,7 @@ The figure below shows the setup and assgined worker IDs  for the Skewed worker 
 
 # Running Experiments
 ### Run the switch program
-The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/parhamyassini/horus-p4). 
+The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/horus-scheduler/horus-p4). 
 
 ### Run the Workers
 1.  Make sure that shinjuku.conf is correct according to previous part of the instructions. 
@@ -244,20 +243,14 @@ sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n horus
 ```
 
 #### Running multiple clients
-For rates up to 200KRPS, we use one machine (cs-nsl-62) and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
+For rates, up to 200KRPS we use one lcore for tx and one lcore for rx. 
+Rates up to 600KRPS, are generated using one machine using 3 tx and 3 rx cores (on cs-nsl-62), and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
 
-> We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediatly to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point the delays were consistant and low (few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* machine. 
+> We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediatly to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point the delays were consistant and low (few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* pair of tx/rx cores. 
 
-For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID 110``` in dpdk_client.c). ** Note: ** Make sure to use the corresponding client ID and change it (if necessary) in the dpdk_client.c on client machine.  
+For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID_ROCKSDB 110``` in util.h). ** Note: ** Make sure to use the corresponding client ID and change it (if necessary) in the util.h on client machine.  To add new clients, the [controller config files](https://github.com/horus-scheduler/horus_controller/blob/main/conf/horus-topology.toml) should be modified using a new `[[topology.clients]]` tag. 
 
 Also, we used spine scheduler ID 100 in our experiment (```#define SPINE_SCHEDULER_ID 100``` in dpdk_client.c). This ID is assigned to every switch in the network (in spine P4 code we have the same ID).  
-
-To generate the loads we used this setup:
-- For load <= 200K: Use cs-nsl-62 only. 
-- For 200K < load <= 300K: Generate 100K on nsl-42 and the rest on nsl-62.
- - For load > 300K: Generate 200K on nsl-42 and the rest on nsl-62.
-
-To do so, run the client codes on the desired machines. 
 
 
 ### Collecting the latency results
@@ -275,11 +268,12 @@ The main output file contains response time for every task in nanoseconds. In ad
 * ```<output>.queue_lengths```: queue len of worker that executed the tasks.
 
 ### Collecting the overhead results
-The results for the msg rate and processing overheads could be collected directly from the switch controller python script which reads the register values (internal state of switch). 
+The results for the msg rate and processing overheads could be collected directly from the switch controller which reads the register values (internal state of switch). 
 
-The details can be found in [this repo](https://github.com/parhamyassini/horus-p4). 
+The details can be found in [this repo](https://github.com/horus-scheduler/horus-p4). 
 
-> Note that we need to record the number of tasks and task rate for each experiment form client outputs in addition to the switch controller outputs. We use the total number of tasks (output of client) and the task rate (e.g., 30KRPS) to calculate the exact experiment duration. Then, we will use the total number of msgs to calculate the *rate* (#msgs/duration(s)).
+> Note that upon exiting the controller, it will record the number of tasks for each experiment. To do so, we need to **stop the load generator first and after a few seconds stop the controller** to make sure the latest number of arrived tasks at the switch is sampled by the controller. 
+> We use the total number of tasks (output of controller) and the task rate (e.g., 30KRPS) to calculate the exact experiment duration. Then, we will use the total number of msgs to calculate the *rate* (#msgs/duration(s)).
 
 ### Analyze/plot the results
 > The python script ```parselats.py``` is useful for quickly getting the 99th percentile mean and median from the response times. It gets one argument which is the file to be anlayzed. Example:
