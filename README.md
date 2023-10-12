@@ -2,12 +2,13 @@
 This repository contains the code for programs that run on end-hosts for NSDI24 Paper "Horus: Granular In-Network Task Scheduler for Cloud Datacenters".
 The code is based on [Racksched repo](https://github.com/netx-repo/RackSched) with modifications based on our network protocols and queue model. 
 
-The modified parts are commented with tag *HORUS* in the source code.
+The modified parts are commented with the tag *HORUS* in the source code.
 
 - *server_code* folder contains the code that runs on worker machines that serve the tasks.
-- *client_code* folder contains the code that runs on clients, generates the requests, sends them to network and captures the replies from workers.
-
-# Note on Deploy Keys
+- *client_code* folder contains the code that runs on clients, generates the requests, sends them to the network, and captures the replies from workers.
+# Environment Setup and Automation Scripts
+## Using Ansible
+### Note on Deploy Keys
 This is specific to our current testbed. Each machine involved in the experiments has a deploy key, which is configured as follows:
 
 * The deploy key is located in `/local-scratch/.ssh/`
@@ -15,34 +16,32 @@ This is specific to our current testbed. Each machine involved in the experiment
 * To clone a repo, use the following command: `git clone git@github.com-repo-horus-app-eval:horus-scheduler/horus-app-eval.git`
 * The current location of this repo is `/local-scratch/horus-app-eval`
 
-# Setting Up Nodes with Ansible
+### Setting Up Nodes with Ansible
 
-Note: This experimental part could be used to prepare all the servers and clients, making them ready to run the processes on them. You can also try to setup the nodes with manual commands in [Setting up worker machines](/README.md#Setting-up-worker-machines). Run all ansible commands in `ansible-setup` directory.
+Note: This experimental part could be used to prepare all the servers and clients, making them ready to run the processes on them. You can also try to setup the nodes with manual commands in [Setting up worker machines](/README.md#Setting-up-worker-machines). Run all ansible commands in the `ansible-setup` directory.
 
-## Create Vault File for Remote SSh User Credential
+#### Create Vault File for Remote SSH User Credential
 
-First, create a `vault-password-file` and write down the decryption key in that. After that, run these following commands
+First, create a `vault-password-file` and write down a decryption key in that. After that, run the following commands
 ```
 ansible-vault encrypt_string --vault-id userid@./vault-password-file '<ssh password>' --name 'ansible_password'
 ansible-vault encrypt_string --vault-id userid@./vault-password-file '<sudo password>' --name 'ansible_become_password'
 ```
 
-These commands create encrypted strings which could be decrypted by the `vault-password-file`. Fill the file `ansible-setup/groupvars/all` with the output of these commands, and replace "\<user\>" with the correct ssh user. **Caution**: Do not commit the `vault-password-file`.
-. 
+These commands create encrypted strings which could be decrypted by the `vault-password-file`. Fill the file `ansible-setup/groupvars/all` with the output of these commands, and replace "\<user\>" with the correct ssh user. **Caution**: Do not commit the `vault-password-file`. 
 
-
-## Configure the Inventory File
+### Configure the Inventory File
 
 Edit the `inventory.yaml` file and change it to be compatible with your testbed machines. Currently, it is configured based on our original testbed. 
 
-## Run setup command
+### Run setup command
 
 Setting up the machines (both clients and servers) for the first time, no need to run this playbook again. 
 ```
 ansible-playbook -i inventory.yaml --vault-id userid@./vault-password-file setup-playbook.yaml
 ```
 
-## Run prepare command
+### Run prepare command
 
 Preparing to run the server processes, this step should be run after every reboot of hosts. 
 ```
@@ -52,12 +51,12 @@ ansible-playbook -i inventory.yaml --vault-id userid@./vault-password-file prepa
 If you run these commands without any error, continue to section [Running Experiments](/README.md##Running-Experiments)
 
 ------
-
-# Setting up worker machines
+## Manual Setup using Scripts
+### Setting up worker machines
 These steps need to be done only once for setting up the worker machines
-## Downgrading Kernel Version to 4.4
+### Downgrading Kernel Version to 4.4
 Dune which is a required component for Shinjuku did not compile/run successfully on newer Kernels.
-### Download and install old kernel
+#### Download and install old kernel
 > General note:  after reboot the 10G interface might get precedence and system could boot using that. In that case we get locked out!
 > To fix this, make sure that only the primary interface is up in interface defult setting: /etc/network/interfaces.
 Based on these sources: [1](https://serverascode.com/2019/05/17/install-and-boot-older-kernel-ubuntu.html) and [2](https://unix.stackexchange.com/questions/198003/set-default-kernel-in-grub).
@@ -78,7 +77,7 @@ Based on this [source](https://askubuntu.com/questions/798975/no-network-no-usb-
 sudo apt-get install linux-headers-4.4.0-142-generic
 sudo apt-get install linux-image-extra-4.4.0-142-generic
 ```
-### Update GRUB
+#### Update GRUB
 
 Comment out the current default grub in `/etc/default/grub` and replace it with the sub-menu's `$menuentry_id_option` from output of this command:
 `grep submenu /boot/grub/grub.cfg`
@@ -100,7 +99,7 @@ To revert to latest kernel just need to uncomment the line
 
 Then reboot the system.
 
-### Disable KASLR
+#### Disable KASLR
 
 Dune does not support kernel address space layout randomization (KASLR). For newer kernels, you must specify the nokaslr parameter in the kernel command line. Check before inserting the module by executing  `cat /proc/cmdline`. If the command line does not include the nokaslr parameter, then you must add it. In order to add it in Ubuntu-based distributions, you must:
 
@@ -110,7 +109,7 @@ Dune does not support kernel address space layout randomization (KASLR). For new
 -   reboot the system.
 
 
-### Install the default NIC  drivers
+#### Install the default NIC  drivers
 Without this step, the default ethernet did not show up after reboot. 
 
 Follow [these](https://askubuntu.com/questions/1067564/intel-ethernet-i219-lm-driver-in-ubuntu-16-04) instructions to install the driver manually.
@@ -122,9 +121,7 @@ nameserver 142.58.200.2
 search cmpt.sfu.ca
 ```
 
-> Side note: On cs-nsl-55 when keyboard is connected, the system won't boot until you press F1! That is because of the [Dell's Cover openned alert](https://www.dell.com/support/kbdoc/en-ca/000150875/how-to-reset-or-remove-an-alert-cover-was-previously-removed-message-that-appears-when-starting-a-dell-optiplex-computer)! (not resolved)
-
-## Build
+### Build
 The setup.sh script installs the required library and components for running the worker code and RocksDB. 
 ```
 cd ./server_code/shinjuku-rocksdb/
@@ -132,15 +129,15 @@ cd ./server_code/shinjuku-rocksdb/
 ```
 In summary the script does the following: (1) Installs libraries (e.g libconfig-dev), (2) fetches Shinjuku dependency repositories (e.g., DPDK), (3) Applies our patch for Dune to make it run on the lab machines, (4) Builds the fetched projects and (5) inserts the kernel modules.
  
-#### After Reboot
+##### After Reboot
 The "after_boot.sh" script should be run after each reboot.  It adds the kernel modules, allocates the needed 2MB hugepages for DPDK, and unbinds the 10G NIC from Kernel driver. 
 > Note: might need to modify the NIC name for the machine in the script as instructed (e.g., 0000:01:00.0)
 
+### Setting up Clients
+These steps are only needed for the machine that runs the load generator (DPDK client).
 
-# Setting up Clients
-These steps are only needed for the machine that runs DPDK client.
-## Build
-### Build dependencies
+#### Build
+#### Build dependencies
 Setup the DPDK environments variables (or alternatively, add them permanently):
 ```
 export RTE_SDK=/home/<username>/dpdk/dpdk-stable-16.11.1
@@ -152,7 +149,7 @@ export RTE_TARGET=x86_64-native-linuxapp-gcc
 ./setup.sh
 ```
 
-### Build the client code
+#### Build the client code
 ```
 cd ./client_code/client/
 make
@@ -180,13 +177,13 @@ These port IDs used for matching with ```hdr.dst_id``` in packets to queue the t
 
 #### Balanced/Uniform Setup
 The figure below shows the uniform (i.e., balanced) placement setup. 
-The python controller in switch codes puts one machine per rack (by logically dividn the register space). Note that the IDs assigned to worker cores are based on a hardcoded parameter in the switch which defines the boundaries for array indexes of each rack. E.g., in our case we used 16 as the boundary, so the IDs for racks start at 1-17-33-49 and etc.
-> In real-world setup, this boundary should be set to max. expected leaves per cluster for spine switches and max. number of workers for each vcluster per rack.
+The Python controller in switch codes puts one machine per rack (by logically dividing the register space). Note that the IDs assigned to worker cores are based on a hardcoded parameter in the switch which defines the boundaries for array indexes of each rack. E.g., in our case we used 16 as the boundary, so the IDs for racks start at 1-17-33-49 and etc.
+> In a real-world setup, this boundary should be set to max. expected leaves per cluster for spine switches and max. number of workers for each vcluster per rack.
  
  ![Worker Setup Uniform](./figs/placement_uniform.png)
 
 #### Skewed Setup
-The figure below shows the setup and assgined worker IDs  for the Skewed worker placement. The boundaries for arrays are similar to the previous setup. That's why the worker IDs for second rack starts at 17.
+The figure below shows the setup and assigned worker IDs  for the Skewed worker placement. The boundaries for arrays are similar to the previous setup. That's why the worker IDs for the second rack start at 17.
 
 ![Worker Setup Skewed](./figs/placement_skewed.png)
 
@@ -196,9 +193,9 @@ The figure below shows the setup and assgined worker IDs  for the Skewed worker 
 The P4 codes and instructions to run the switch program are provided in [this repo](https://github.com/horus-scheduler/horus-p4). 
 
 ### Run the Workers
-1.  Make sure that shinjuku.conf is correct according to previous part of the instructions. 
+1.  Make sure that shinjuku.conf is correct according to the previous part of the instructions. 
 2. Run Shinjku (and RocksDB) using ```./build_and_run.sh```. The script will make a fresh copy of the DB, builds shinjuku and runs it. 
-3. Wait for the outputs log that mentions worker is ready ("do_work: Waiting for dispatcher work"). 
+3. Wait for the outputs log that mentions the worker is ready ("do_work: Waiting for dispatcher work"). 
 
 
 ### Run the client(s)
@@ -209,7 +206,7 @@ sudo ./build/dpdk_client -l 0,1 -- <args>
 The first arg after *-l* is an input for DPDK indicating that we use two cores (one for RX and one for TX loop). The rest of args (after ``--`` are inputs to dpdk_client.c) and will configure the behaviour of the client.
 
 **args:** 
-The first arg ```-l``` is input for DPDK and tells it to use two cores (0,1). One core will process sending loop and another core will handle the receive loop for reply packets.
+The first arg ```-l``` is input for DPDK and tells it to use two cores (0,1). One core will process the sending loop and another core will handle the receive loop for reply packets.
 The rest of args are handled by our code:
 
 * ```-l```: (is) **L**atency client?; Type: bool. 
@@ -223,32 +220,36 @@ The rest of args are handled by our code:
 	"db_bimodal": Runs RocksDB requests with 90%GET-10%SCAN.
 	
 	"db_port_bimodal": Runs RocksDB requests with 50%GET-50%SCAN. 
+	
+	"tpc": Runs multi-modal workload based on TPC-C benchmark.
+	
 * ```-q```: Req. rate (**Q**PS). Type: int;
 
 	An integer speciying the rate per second. The requests will have an exponential inter-arrival time where mean inter-arrival is calculated based on this parameter.
 	
-* ```-r```: (is) **R**ocksDB; Type: bool;
-
-	1: Means using rocksDB (*We only use this setup*)
-	
-	0: Means using synthetic workloads
-
 * ```-n```: Experiment **N**ame; Type: String;
 
-	String attached to the result file name to distinguish the different 	expeirments. E.g. "rs_h" or "horus".
+	String attached to the result file name to distinguish the different expeirments. E.g. "rs_h" or "horus".
 
+* ```-a```
+Number of 
 Example:
 ```
 sudo ./build/dpdk_client -l 0,1 -- -l 1 -d db_bimodal -q 30000 -r 1 -n horus
 ```
 
 #### Running multiple clients
-For rates, up to 200KRPS we use one lcore for tx and one lcore for rx. 
-Rates up to 600KRPS, are generated using one machine using 3 tx and 3 rx cores (on cs-nsl-62), and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
+For rates, up to 200KRPS we use one lcore for tx and one lcore for rx. The number of tx and rx cores can be increased by specifying the core numbers using the -l option for DPDK:
+**Example:** Using two tx and two rx cores sending 200K from each core resulting in 400KRPS rate
+```
+sudo ./build/dpdk_client -l 0,1,2,3 -- -l 1 -d db_bimodal -q 100000 -n horus
+```
+Rates up to 600KRPS, are generated using one machine using 3 tx and rx cores (on cs-nsl-62), and for higher rates we used two machines (cs-nsl-42 and cs-nsl-62).
 
-> We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediatly to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point the delays were consistant and low (few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* pair of tx/rx cores. 
+> We ran simple experiments to make sure that the bottleneck is not at the request generator. In that experiment, we sent packets from client to switch and  the switch sent back every packet immediately to the client. We measured the response time as we increased the request  rate. The results  showed that around ~240KRPS the client gets saturated and the delays start to increase and before this point, the delays were consistent and low (a few microseconds).  Therefore, we avoid generating higher rates than 200K using *one* pair of tx/rx cores. 
 
-For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID_ROCKSDB 110``` in util.h). ** Note: ** Make sure to use the corresponding client ID and change it (if necessary) in the util.h on client machine.  To add new clients, the [controller config files](https://github.com/horus-scheduler/horus_controller/blob/main/conf/horus-topology.toml) should be modified using a new `[[topology.clients]]` tag. 
+For clients, we use ID 110 for nsl-62 and ID 111 for nsl-42 (e.g., ```#define CLIENT_ID_ROCKSDB 110``` in util.h). 
+**Note:** Make sure to use the corresponding client ID and change it (if necessary) in the util.h on client machine.  To add new clients, the [controller config files](https://github.com/horus-scheduler/horus_controller/blob/main/conf/horus-topology.toml) should be modified using a new `[[topology.clients]]` tag. 
 
 Also, we used spine scheduler ID 100 in our experiment (```#define SPINE_SCHEDULER_ID 100``` in dpdk_client.c). This ID is assigned to every switch in the network (in spine P4 code we have the same ID).  
 
@@ -272,7 +273,7 @@ The results for the msg rate and processing overheads could be collected directl
 
 The details can be found in [this repo](https://github.com/horus-scheduler/horus-p4). 
 
-> Note that upon exiting the controller, it will record the number of tasks for each experiment. To do so, we need to **stop the load generator first and after a few seconds stop the controller** to make sure the latest number of arrived tasks at the switch is sampled by the controller. 
+> Note that upon exiting the controller, it will record the number of tasks for each experiment. To do so, we need to **stop the load generator first and after a few seconds stop the controller** to make sure the latest stats from the switch data plane is sampled by the controller. 
 > We use the total number of tasks (output of controller) and the task rate (e.g., 30KRPS) to calculate the exact experiment duration. Then, we will use the total number of msgs to calculate the *rate* (#msgs/duration(s)).
 
 ### Analyze/plot the results
@@ -280,7 +281,7 @@ The details can be found in [this repo](https://github.com/horus-scheduler/horus
 ```python parselats.py ./results/output_horus_db_port_bimodal_90000```
 
 The results for response times (ones used in the paper) are stored on the 2TB SSD drive under ```./horus-result/testbed``` folder. 
-The response time metrics are plotted based on the output files generated by client script and the overhead metrics (e.g #resubmissions, #msgs, and etc.) are summerized in the python code as arrays. Also, the  load steps (x-axis ticks) depends on workload and placement these are hardcoded in the script based on our experiments.
+The response time metrics are plotted based on the output files generated by client script and the overhead metrics (e.g #resubmissions, #msgs, and etc.) are summerized in the python code as arrays. Also, the  load steps (x-axis ticks) depend on workload and placement these are hardcoded in the script based on our experiments.
 
 The python script ```plot_results.py``` is the one used for plotting the testbed results in the paper. 
 
@@ -288,16 +289,7 @@ The python script ```plot_results.py``` is the one used for plotting the testbed
 * ``-d`` **W**orking directory: The directory to read the response time files. The output plots will be also saved in ```./<working-dir>/plots``` folder.
 * ```-t``` **T**ask distribution type: can be "db_bimodal"(90%GET-10%SCAN) or "db_port_bimodal" (50%-GET-50%SCAN).
 * ``-s`` Placement **S**etup: indicates that the result to be plotted is for which worker placement setup: use "s" for skewed and "b" for balanced (i.e., uniform).
-*  ```--overheads```: Optional argument which indicates that overhead metrics should be plotted or the response time metircs (for response time do not pass this option).
+*  ```--overheads```: Optional argument which indicates that overhead metrics should be plotted or the response time metrics (for response time do not pass this option).
 
- > The current plotting script is just plotting the 99th percentile response time. However the written function is configurable for different metrics (e.g queue len) and different stats (e.g average instead of 99%)  see the commented function calls for details.
+ > The current plotting script is just plotting the 99th percentile response time. However, the written function is configurable for different metrics (e.g queue len) and different stats (e.g average instead of 99%)  see the commented function calls for details.
  > 
-## Known Issues
-### Dune hardware compatibility issue
-Sumamry of the issue and root cause (as far as we know) are below. TD;LR To run our nsl-5* machines Intel(R) Xeon(R) E-2186G CPU, we need to disable Dune's APIC Interrupt calls. Also, we disable the preemption mechanism in Shinjuku (it's by design;  as we did not intend to evaluate the server scheduler). In our experiments we do not rely on preemption feature of Shinjuku as worker cores have dedicated task queues. 
-When running Shinjuku it freezes when calling the init function of Dune.  
-It freezes just after  [this line](https://github.com/kkaffes/dune/blob/78c6679a993b9e014d0f7deb030dc5bbd0abe0b8/libdune/entry.c#L481). CPU gets stock after creating vCPU.
-
->For Dune, [this repo](https://github.com/ix-project/dune) works fine on our machine but the one Shinjuku uses is from this repo [this repo](https://github.com/kkaffes/dune). The problem is that the second repo adds some new APIs and functionalities to Dune that are necessary for Shinjuku so it is not possible to simply use the first Dune. 
-
->The issue was related to the usage of Advanced Programmable Interrupt Controllers (APIC) in Dune. It seems like there are multiple operations on the "hardware-specific register" and the address of these registers and values were hardcoded in Dune codes. I think there might be changes in these hardware-specific registers in the next-gen Intel CPUs and that's why it worked on Ramses but didn't work on nsl-55 (the CPUs are from different year/generations).
